@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>abc composer</title>
+<meta name="description" content="a bauhaus-styled abc notation editor with score rendering and midi playback">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@600;700;800&display=swap" rel="stylesheet">
+
+<!-- abcjs: rendering + web-audio synth. @6 tracks the latest 6.x release. -->
+<script src="https://cdn.jsdelivr.net/npm/abcjs@6/dist/abcjs-basic-min.js"></script>
+
+<style>
+  :root{
+    --cream:   #F0EEE8;
+    --paper:   #FDFCFA;
+    --ink:     #15130F;
+    --muted:   #6B675E;
+    --line:    #DEDACF;
+    --red:     #C41E2A;
+    --blue:    #1B4C9C;
+    --rule:    2px;
+    --radius:  0px;
+  }
+
+  *{ box-sizing:border-box; }
+
+  html{ -webkit-text-size-adjust:100%; }
+
+  body{
+    margin:0;
+    background:var(--cream);
+    color:var(--ink);
+    font-family:"Archivo", sans-serif;
+    line-height:1.5;
+  }
+
+  h1,h2,h3, .display{
+    font-family:"Space Grotesk", sans-serif;
+    font-weight:600;
+    letter-spacing:-0.01em;
+    margin:0;
+  }
+
+  button, select, input{ font-family:inherit; }
+
+  a{ color:var(--ink); }
+
+  :focus-visible{
+    outline:3px solid var(--blue);
+    outline-offset:2px;
+  }
+
+  /* ---------- shapes (functional, not decorative) ---------- */
+  .shape{ display:inline-block; flex-shrink:0; }
+  .shape.circle{ border-radius:50%; }
+  .shape.triangle{
+    width:0; height:0;
+    background:transparent !important;
+    border-top:9px solid transparent;
+    border-bottom:9px solid transparent;
+    border-left:14px solid currentColor;
+  }
+  .shape.square{ border-radius:var(--radius); }
+
+  /* ---------- header ---------- */
+  header{
+    background:var(--ink);
+    color:var(--paper);
+    padding:20px clamp(16px,4vw,40px);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:20px;
+    box-shadow:0 2px 0 var(--red);
+  }
+  .brand{ display:flex; align-items:center; gap:14px; }
+  .brand-marks{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:0;
+    width:34px; height:34px;
+    border:1.5px solid var(--paper);
+    flex-shrink:0;
+  }
+  .brand-marks .triangle{ color:var(--red); transform:scale(0.85); }
+  .brand-text h1{ font-size:clamp(20px,3vw,26px); color:var(--paper); }
+  .brand-text p{ margin:2px 0 0; font-size:12.5px; color:#9C978B; }
+  header .tagline{
+    font-size:13px;
+    max-width:260px;
+    text-align:right;
+    color:#9C978B;
+    display:none;
+  }
+  @media (min-width:760px){ header .tagline{ display:block; } }
+
+  /* ---------- layout ---------- */
+  main{
+    display:grid;
+    grid-template-columns: minmax(300px, 38%) 1fr;
+    gap:var(--rule);
+    background:var(--ink);
+    padding:0;
+  }
+  @media (max-width:900px){
+    main{ grid-template-columns: 1fr; }
+  }
+
+  section.pane{
+    background:var(--paper);
+    padding:clamp(16px,3vw,28px);
+    min-width:0;
+  }
+
+  .pane-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:10px;
+    margin-bottom:16px;
+    border-bottom:1.5px solid var(--ink);
+    padding-bottom:10px;
+  }
+  .pane-head h2{ font-size:17px; }
+  .pane-head .count{ font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+
+  .editor-wrap{
+    display:grid;
+    width:100%;
+  }
+  .editor-wrap > #abc-input,
+  .editor-wrap > #abc-highlight{
+    grid-area:1 / 1 / 2 / 2;
+    width:100%;
+    min-height:360px;
+    padding:16px;
+    margin:0;
+    border:1.5px solid transparent;
+    font-family:"JetBrains Mono", "Consolas", monospace;
+    font-weight:700;
+    font-size:13.5px;
+    letter-spacing:-0.01em;
+    line-height:1.7;
+    white-space:pre-wrap;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+    box-sizing:border-box;
+  }
+  #abc-highlight{
+    background:var(--paper);
+    border-color:var(--ink);
+    color:var(--ink);
+    overflow:hidden;
+    pointer-events:none;
+    user-select:none;
+  }
+  #abc-input{
+    resize:vertical;
+    background:transparent;
+    color:transparent;
+    caret-color:var(--ink);
+    border-color:transparent;
+    position:relative;
+    z-index:1;
+  }
+  #abc-input::placeholder{ color:#ACA79A; -webkit-text-fill-color:#ACA79A; font-weight:600; }
+  #abc-input:focus{ outline:none; }
+  .editor-wrap:focus-within #abc-highlight{ border-color:var(--blue); }
+
+  .tok-field{ color:var(--blue); font-weight:800; }
+  .tok-header-value{ color:var(--ink); }
+  .tok-comment{ color:var(--muted); font-style:italic; font-weight:600; }
+  .tok-lyric{ color:var(--blue); font-style:italic; }
+  .tok-chord{ color:var(--red); font-weight:800; }
+  .tok-deco{ color:var(--red); font-style:italic; font-weight:600; }
+  .tok-bar{ color:var(--muted); font-weight:800; }
+
+  .field-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-top:14px;
+  }
+
+  .btn{
+    appearance:none;
+    border:1.5px solid var(--ink);
+    background:var(--paper);
+    color:var(--ink);
+    padding:10px 16px;
+    font-size:13px;
+    font-weight:600;
+    cursor:pointer;
+    border-radius:var(--radius);
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    transition:background .12s ease, color .12s ease, border-color .12s ease;
+  }
+  .btn:hover{ background:var(--ink); color:var(--paper); }
+  .btn:active{ opacity:.85; }
+  .btn.accent{ background:var(--red); border-color:var(--red); color:var(--paper); }
+  .btn.accent:hover{ background:var(--ink); border-color:var(--ink); }
+  .btn:disabled{ opacity:.45; cursor:not-allowed; }
+  .btn:disabled:hover{ background:var(--paper); color:var(--ink); }
+
+  section.pane.drag-over{ outline:2px dashed var(--blue); outline-offset:-2px; }
+  input[type="file"]{ display:none; }
+
+  /* ---------- score pane ---------- */
+  #paper{
+    background:var(--paper);
+    min-height:220px;
+    overflow-x:auto;
+  }
+  #paper svg{ max-width:100%; }
+  .abcjs-highlight{ fill:var(--red) !important; }
+
+  .score-empty{
+    border:1.5px dashed var(--line);
+    padding:32px 20px;
+    text-align:center;
+    color:var(--muted);
+    font-size:14px;
+  }
+
+  /* ---------- transport ---------- */
+  footer{
+    background:var(--ink);
+    color:var(--paper);
+    padding:18px clamp(16px,4vw,40px) 26px;
+    display:flex;
+    flex-direction:column;
+    gap:16px;
+  }
+
+  .transport-row{
+    display:flex;
+    align-items:center;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+
+  .transport-controls{ display:flex; align-items:center; gap:10px; }
+
+  .round-btn{
+    width:46px;
+    height:46px;
+    border-radius:50%;
+    border:2px solid var(--paper);
+    background:transparent;
+    color:var(--paper);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+  }
+  .round-btn.primary{ background:var(--red); border-color:var(--red); }
+  .round-btn.primary .triangle{ color:var(--paper); margin-left:3px; }
+  .round-btn.primary.is-playing .triangle{ display:none; }
+  .round-btn.primary .bars{ display:none; gap:3px; }
+  .round-btn.primary.is-playing .bars{ display:flex; }
+  .round-btn.primary .bars span{ width:4px; height:14px; background:var(--paper); display:block; }
+  .round-btn:disabled{ opacity:.4; cursor:not-allowed; }
+  .round-btn:hover:not(:disabled){ background:var(--blue); border-color:var(--blue); }
+  .round-btn .square{ width:14px; height:14px; background:currentColor; }
+
+  .progress-wrap{
+    flex:1 1 200px;
+    min-width:160px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  #progress{
+    -webkit-appearance:none;
+    appearance:none;
+    width:100%;
+    height:4px;
+    background:#494539;
+    outline:none;
+  }
+  #progress::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:14px; height:14px;
+    background:var(--red);
+    border-radius:50%;
+    cursor:pointer;
+  }
+  #progress::-moz-range-thumb{
+    width:14px; height:14px;
+    background:var(--red);
+    border:none;
+    border-radius:50%;
+    cursor:pointer;
+  }
+  #time-label{ font-size:12px; font-variant-numeric:tabular-nums; color:#C8C4BA; min-width:44px; }
+
+  .transport-group{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .transport-group label{ font-size:12px; color:#C8C4BA; }
+
+  select#instrument, select.tform{
+    background:var(--paper);
+    color:var(--ink);
+    border:2px solid var(--paper);
+    padding:8px 10px;
+    font-size:13px;
+    font-weight:600;
+    border-radius:var(--radius);
+  }
+
+  .tempo-wrap{ display:flex; align-items:center; gap:8px; }
+  #tempo-value{ font-variant-numeric:tabular-nums; font-size:12px; color:#C8C4BA; min-width:70px; }
+  input[type="range"]#tempo{
+    -webkit-appearance:none; appearance:none;
+    width:110px; height:4px; background:#494539;
+  }
+  input[type="range"]#tempo::-webkit-slider-thumb{
+    -webkit-appearance:none; width:14px; height:14px;
+    background:var(--blue); border-radius:50%; cursor:pointer;
+  }
+
+  #status-line{
+    font-size:12px;
+    color:#C8C4BA;
+    min-height:16px;
+  }
+  #status-line.error{ color:var(--red); font-weight:600; }
+
+  .downloads{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    padding-top:14px;
+    border-top:1px solid #3A362D;
+  }
+  .downloads .btn{
+    border-color:var(--paper);
+    background:transparent;
+    color:var(--paper);
+  }
+  .downloads .btn:hover{ background:var(--paper); color:var(--ink); }
+  #midi-download-holder a{
+    border:2px solid var(--paper);
+    color:var(--paper);
+    text-decoration:none;
+    padding:10px 16px;
+    font-size:13px;
+    font-weight:600;
+    display:inline-flex;
+    align-items:center;
+  }
+  #midi-download-holder a:hover{ background:var(--paper); color:var(--ink); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition:none !important; animation:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="brand-marks">
+      <span class="shape triangle"></span>
+    </div>
+    <div class="brand-text">
+      <h1>abc composer</h1>
+      <p>write in abc notation, see the score, hear it played back</p>
+    </div>
+  </div>
+  <p class="tagline">a small tool for writing tunes: type standard abc notation on the left, get a formatted score and instrument playback on the right.</p>
+</header>
+
+<main>
+  <section class="pane" aria-labelledby="editor-heading">
+    <div class="pane-head">
+      <h2 id="editor-heading">notation</h2>
+      <span class="count" id="char-count">0 characters</span>
+    </div>
+
+    <div class="editor-wrap">
+      <pre id="abc-highlight" aria-hidden="true"><code id="abc-highlight-code"></code></pre>
+      <textarea id="abc-input" spellcheck="false" aria-label="ABC notation source" placeholder="X:1&#10;T:Untitled&#10;M:4/4&#10;L:1/8&#10;Q:1/4=120&#10;K:C&#10;C D E F | G A B c |]"></textarea>
+    </div>
+
+    <div class="field-row">
+      <button class="btn accent" id="render-btn">render score</button>
+      <button class="btn" id="upload-btn">upload .abc / .txt</button>
+      <input type="file" id="file-input" accept=".abc,.txt,text/plain">
+      <button class="btn" id="download-abc">download .abc</button>
+      <button class="btn" id="download-svg">download score (svg)</button>
+    </div>
+    <p style="margin:10px 0 0; font-size:12px; color:var(--muted);">or drag a .abc / .txt file into this panel</p>
+  </section>
+
+  <section class="pane" aria-labelledby="score-heading">
+    <div class="pane-head">
+      <h2 id="score-heading">score</h2>
+      <span class="count" id="tune-title">—</span>
+    </div>
+    <div id="paper"><p class="score-empty">your rendered score will appear here.</p></div>
+  </section>
+</main>
+
+<footer>
+  <div class="transport-row">
+    <div class="transport-controls">
+      <button class="round-btn primary" id="play-btn" aria-label="play">
+        <span class="shape triangle"></span>
+        <span class="bars"><span></span><span></span></span>
+      </button>
+      <button class="round-btn" id="stop-btn" aria-label="stop">
+        <span class="shape square"></span>
+      </button>
+    </div>
+
+    <div class="progress-wrap">
+      <input type="range" id="progress" min="0" max="1000" value="0" aria-label="playback position">
+      <span id="time-label">0:00</span>
+    </div>
+
+    <div class="transport-group">
+      <label for="instrument">instrument</label>
+      <select id="instrument">
+        <option value="0">acoustic grand piano</option>
+        <option value="24">nylon guitar</option>
+        <option value="89">warm synth pad</option>
+        <option value="88">soft synth pad</option>
+        <option value="50">synth strings</option>
+      </select>
+    </div>
+
+    <div class="transport-group tempo-wrap">
+      <label for="tempo">tempo</label>
+      <input type="range" id="tempo" min="40" max="240" value="120" step="1">
+      <span id="tempo-value">120 bpm</span>
+    </div>
+  </div>
+
+  <div id="status-line" role="status">loading audio engine…</div>
+
+  <div class="downloads">
+    <button class="btn" id="download-midi-btn">download midi</button>
+    <span id="midi-download-holder"></span>
+  </div>
+</footer>
+
+<script>
+(function(){
+
+  /* ---------------------------------------------------------
+     Elements
+  --------------------------------------------------------- */
+  const abcInput      = document.getElementById('abc-input');
+  const highlightCode  = document.getElementById('abc-highlight-code');
+  const editorWrap      = document.querySelector('.editor-wrap');
+  const editorPane         = document.getElementById('editor-heading').closest('.pane');
+  const uploadBtn           = document.getElementById('upload-btn');
+  const fileInput            = document.getElementById('file-input');
+  const charCount      = document.getElementById('char-count');
+  const tuneTitle       = document.getElementById('tune-title');
+  const paperEl        = document.getElementById('paper');
+  const renderBtn       = document.getElementById('render-btn');
+  const playBtn         = document.getElementById('play-btn');
+  const stopBtn          = document.getElementById('stop-btn');
+  const progressEl       = document.getElementById('progress');
+  const timeLabel        = document.getElementById('time-label');
+  const instrumentSelect = document.getElementById('instrument');
+  const tempoSlider      = document.getElementById('tempo');
+  const tempoValue       = document.getElementById('tempo-value');
+  const statusLine       = document.getElementById('status-line');
+  const downloadAbcBtn   = document.getElementById('download-abc');
+  const downloadSvgBtn   = document.getElementById('download-svg');
+  const downloadMidiBtn  = document.getElementById('download-midi-btn');
+  const midiHolder        = document.getElementById('midi-download-holder');
+
+  let tuneObjects = [];
+  let synthControl = null;
+  let audioReady = false;
+  let isPlaying = false;
+  let userSeeking = false;
+
+  /* ---------------------------------------------------------
+     Status helper
+  --------------------------------------------------------- */
+  function setStatus(msg, isError){
+    statusLine.textContent = msg;
+    statusLine.classList.toggle('error', !!isError);
+  }
+
+  /* ---------------------------------------------------------
+     Syntax highlighting (overlay <pre> behind the textarea)
+  --------------------------------------------------------- */
+  const HEADER_FIELDS = "ABCDFGHIKLMNOPQRSTUVWXZ";
+
+  function escapeHtml(s){
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function highlightLine(line){
+    if (line.length === 0) return '';
+
+    if (/^%/.test(line)){
+      return '<span class="tok-comment">' + escapeHtml(line) + '</span>';
+    }
+
+    const headerMatch = line.match(/^([A-Za-z]):(.*)$/);
+    if (headerMatch && HEADER_FIELDS.includes(headerMatch[1].toUpperCase())){
+      return '<span class="tok-field">' + escapeHtml(headerMatch[1] + ':') + '</span>' +
+             '<span class="tok-header-value">' + escapeHtml(headerMatch[2]) + '</span>';
+    }
+
+    if (/^w:/.test(line)){
+      return '<span class="tok-lyric">' + escapeHtml(line) + '</span>';
+    }
+
+    let html = escapeHtml(line);
+    html = html.replace(/"([^"]*)"/g, '<span class="tok-chord">"$1"</span>');
+    html = html.replace(/!([^!\s]+)!/g, '<span class="tok-deco">!$1!</span>');
+    html = html.replace(/(\[\d+|\[\|\]?|\|\]|\|\||::|:\|\|?|\|:|\|)/g, '<span class="tok-bar">$1</span>');
+    return html;
+  }
+
+  function updateHighlight(){
+    const lines = abcInput.value.split('\n').map(highlightLine);
+    highlightCode.innerHTML = lines.join('\n') + '\n';
+  }
+
+  abcInput.addEventListener('scroll', () => {
+    document.getElementById('abc-highlight').scrollTop = abcInput.scrollTop;
+    document.getElementById('abc-highlight').scrollLeft = abcInput.scrollLeft;
+  });
+
+  if (typeof ResizeObserver !== 'undefined'){
+    new ResizeObserver(() => {
+      document.getElementById('abc-highlight').style.height = abcInput.offsetHeight + 'px';
+    }).observe(abcInput);
+  }
+
+  /* ---------------------------------------------------------
+     File upload (button + drag-and-drop)
+  --------------------------------------------------------- */
+  function loadFileText(file){
+    if (!file) return;
+    const okExtension = /\.(abc|txt)$/i.test(file.name);
+    if (!okExtension){
+      setStatus('please choose a .abc or .txt file.', true);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      abcInput.value = String(reader.result);
+      charCount.textContent = abcInput.value.length + ' characters';
+      updateHighlight();
+      renderTune();
+      setStatus('loaded ' + file.name);
+    };
+    reader.onerror = () => setStatus('could not read that file.', true);
+    reader.readAsText(file);
+  }
+
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    loadFileText(fileInput.files && fileInput.files[0]);
+    fileInput.value = '';
+  });
+
+  ['dragenter', 'dragover'].forEach(evt => {
+    editorPane.addEventListener(evt, (e) => {
+      e.preventDefault();
+      editorPane.classList.add('drag-over');
+    });
+  });
+  ['dragleave', 'dragend'].forEach(evt => {
+    editorPane.addEventListener(evt, () => editorPane.classList.remove('drag-over'));
+  });
+  editorPane.addEventListener('drop', (e) => {
+    e.preventDefault();
+    editorPane.classList.remove('drag-over');
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    loadFileText(file);
+  });
+
+  /* ---------------------------------------------------------
+     Rendering
+  --------------------------------------------------------- */
+  function renderTune(){
+    const src = abcInput.value;
+    if (!src.trim()){
+      paperEl.innerHTML = '<p class="score-empty">your rendered score will appear here.</p>';
+      tuneTitle.textContent = '—';
+      tuneObjects = [];
+      return;
+    }
+    try{
+      tuneObjects = ABCJS.renderAbc("paper", src, {
+        responsive: "resize",
+        add_classes: true,
+        paddingtop: 16,
+        paddingbottom: 16,
+        paddingleft: 16,
+        paddingright: 16,
+        staffwidth: 640,
+        format: {
+          titlefont: "Space Grotesk 22",
+          subtitlefont: "Archivo 14",
+          composerfont: "Archivo italic 13",
+          gchordfont: "Archivo bold 13",
+          annotationfont: "Archivo 12",
+          tempofont: "Archivo bold 13"
+        }
+      });
+      const t = tuneObjects[0];
+      tuneTitle.textContent = (t && t.metaText && t.metaText.title) ? t.metaText.title : 'untitled';
+      if (synthControl && audioReady){
+        loadTuneIntoSynth(false);
+      }
+    } catch(err){
+      setStatus('could not parse this ABC source — check the notation.', true);
+      console.error(err);
+    }
+  }
+
+  function debounce(fn, ms){
+    let t;
+    return function(...args){
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), ms);
+    };
+  }
+
+  abcInput.addEventListener('input', () => {
+    charCount.textContent = abcInput.value.length + ' characters';
+    updateHighlight();
+  });
+  abcInput.addEventListener('input', debounce(renderTune, 500));
+  renderBtn.addEventListener('click', renderTune);
+
+  /* ---------------------------------------------------------
+     Cursor-following playback highlight
+  --------------------------------------------------------- */
+  let lastHighlighted = [];
+
+  const cursorControl = {
+    onStart: function(){
+      isPlaying = true;
+      updatePlayButton();
+    },
+    onEvent: function(ev){
+      if (ev.measureStart && ev.left === null) return;
+      lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+      lastHighlighted = [];
+      if (ev.elements){
+        ev.elements.forEach(group => {
+          group.forEach(el => {
+            el.classList.add('abcjs-highlight');
+            lastHighlighted.push(el);
+          });
+        });
+      }
+      if (!userSeeking && ev.milliseconds != null && ev.totalMilliseconds){
+        progressEl.value = Math.round((ev.milliseconds / ev.totalMilliseconds) * 1000);
+        timeLabel.textContent = formatTime(ev.milliseconds);
+      }
+    },
+    onFinished: function(){
+      isPlaying = false;
+      updatePlayButton();
+      lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+      lastHighlighted = [];
+      progressEl.value = 0;
+      timeLabel.textContent = '0:00';
+    },
+    onBeat: function(){}
+  };
+
+  function formatTime(ms){
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return m + ':' + String(r).padStart(2, '0');
+  }
+
+  /* ---------------------------------------------------------
+     Audio / synth setup
+  --------------------------------------------------------- */
+  function initAudio(){
+    if (typeof ABCJS === 'undefined' || !ABCJS.synth || !ABCJS.synth.supportsAudio || !ABCJS.synth.supportsAudio()){
+      setStatus('this browser does not support Web Audio playback — try a recent Chrome, Firefox, Safari or Edge.', true);
+      playBtn.disabled = true;
+      stopBtn.disabled = true;
+      return;
+    }
+    synthControl = new ABCJS.synth.SynthController();
+    synthControl.load("#paper", cursorControl, {
+      displayLoop: false,
+      displayRestart: false,
+      displayPlay: false,
+      displayProgress: false,
+      displayWarp: false
+    });
+    audioReady = true;
+    setStatus('ready — press play to hear the score.');
+  }
+
+  function currentInstrumentProgram(){
+    return parseInt(instrumentSelect.value, 10);
+  }
+
+  function loadTuneIntoSynth(userAction){
+    if (!synthControl || !tuneObjects.length) return Promise.resolve();
+    return synthControl.setTune(tuneObjects[0], userAction, {
+      soundFontUrl: "https://paulrosen.github.io/midi-js-soundfonts/abcjs/",
+      program: currentInstrumentProgram(),
+      qpm: parseInt(tempoSlider.value, 10),
+      midiTranspose: 0
+    }).then(() => {
+      setStatus('ready — press play to hear the score.');
+    }).catch(err => {
+      setStatus('could not load the instrument sound — check your connection.', true);
+      console.error(err);
+    });
+  }
+
+  function updatePlayButton(){
+    playBtn.classList.toggle('is-playing', isPlaying);
+    playBtn.setAttribute('aria-label', isPlaying ? 'pause' : 'play');
+  }
+
+  /* ---------------------------------------------------------
+     Transport controls
+  --------------------------------------------------------- */
+  playBtn.addEventListener('click', async () => {
+    if (!tuneObjects.length){
+      setStatus('render a score first.', true);
+      return;
+    }
+    if (!audioReady){
+      setStatus('starting audio engine…');
+      initAudio();
+    }
+    if (!synthControl) return;
+
+    try{
+      if (!isPlaying){
+        setStatus('loading instrument…');
+        await loadTuneIntoSynth(true);
+        await synthControl.play();
+        isPlaying = true;
+      } else {
+        synthControl.pause();
+        isPlaying = false;
+      }
+      updatePlayButton();
+    } catch(err){
+      setStatus('playback could not start — try again.', true);
+      console.error(err);
+    }
+  });
+
+  stopBtn.addEventListener('click', () => {
+    if (!synthControl) return;
+    try{
+      synthControl.pause();
+      if (typeof synthControl.restart === 'function'){
+        synthControl.restart();
+      }
+    } catch(err){ /* no-op */ }
+    isPlaying = false;
+    updatePlayButton();
+    progressEl.value = 0;
+    timeLabel.textContent = '0:00';
+    lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+    lastHighlighted = [];
+  });
+
+  progressEl.addEventListener('pointerdown', () => { userSeeking = true; });
+  progressEl.addEventListener('pointerup', () => {
+    userSeeking = false;
+    if (synthControl && typeof synthControl.seek === 'function'){
+      try{ synthControl.seek(progressEl.value / 1000, "ratio"); } catch(err){ /* no-op */ }
+    }
+  });
+
+  instrumentSelect.addEventListener('change', async () => {
+    if (!audioReady){ initAudio(); }
+    if (!synthControl || !tuneObjects.length) return;
+    const wasPlaying = isPlaying;
+    if (wasPlaying) { synthControl.pause(); isPlaying = false; updatePlayButton(); }
+    setStatus('switching instrument…');
+    await loadTuneIntoSynth(true);
+  });
+
+  tempoSlider.addEventListener('input', () => {
+    tempoValue.textContent = tempoSlider.value + ' bpm';
+  });
+  tempoSlider.addEventListener('change', async () => {
+    if (!audioReady || !synthControl || !tuneObjects.length) return;
+    const wasPlaying = isPlaying;
+    if (wasPlaying) { synthControl.pause(); isPlaying = false; updatePlayButton(); }
+    await loadTuneIntoSynth(true);
+  });
+
+  /* ---------------------------------------------------------
+     Downloads
+  --------------------------------------------------------- */
+  function download(filename, content, mime){
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  downloadAbcBtn.addEventListener('click', () => {
+    download('tune.abc', abcInput.value, 'text/plain');
+  });
+
+  downloadSvgBtn.addEventListener('click', () => {
+    const svg = paperEl.querySelector('svg');
+    if (!svg){
+      setStatus('render a score first.', true);
+      return;
+    }
+    const serializer = new XMLSerializer();
+    let src = serializer.serializeToString(svg);
+    if (!src.match(/^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)){
+      src = src.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    download('score.svg', src, 'image/svg+xml');
+  });
+
+  downloadMidiBtn.addEventListener('click', () => {
+    if (!abcInput.value.trim()){
+      setStatus('render a score first.', true);
+      return;
+    }
+    try{
+      const html = ABCJS.synth.getMidiFile(abcInput.value, {
+        midiOutputType: "link",
+        downloadLabel: "download midi file",
+        fileName: "tune.mid",
+        program: currentInstrumentProgram(),
+        qpm: parseInt(tempoSlider.value, 10)
+      });
+      midiHolder.innerHTML = html;
+    } catch(err){
+      setStatus('could not generate a midi file for this tune.', true);
+      console.error(err);
+    }
+  });
+
+  /* ---------------------------------------------------------
+     Init
+  --------------------------------------------------------- */
+  charCount.textContent = abcInput.value.length + ' characters';
+  updateHighlight();
+  renderTune();
+  initAudio();
+
+})();
+</script>
+
+</body>
+</html>
