@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="apple-touch-icon" href="IMG_1146.jpeg">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ABC Composer</title>
+<meta name="description" content="A Bauhaus-styled ABC notation editor with score rendering and MIDI playback">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@600;700;800&display=swap" rel="stylesheet">
+<!-- abcjs: rendering + web-audio synth. @6 tracks the latest 6.x release. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/abcjs@6/dist/abcjs-audio.css">
+<script src="https://cdn.jsdelivr.net/npm/abcjs@6/dist/abcjs-basic-min.js"></script>
+<style>
+:root{
+  --cream:   #F0EEE8;
+  --paper:   #FDFCFA;
+  --sheet:   #FDFCFA;   /* score surface — stays white in both schemes */
+  --ink:     #15130F;
+  --muted:   #6B675E;
+  --line:    #DEDACF;
+  --red:     #C41E2A;
+  --blue:    #1B4C9C;
+  --blue-soft: #7C9BD6;
+  --purple:  #6A3FA0;
+  --brown:   #8A5A2E;
+  --green:   #2E7D4F;
+  --placeholder: #ACA79A;
+  /* chrome = dark bars (header / footer / pane gaps) */
+  --chrome:       #15130F;
+  --chrome-text:  #FDFCFA;
+  --chrome-muted: #7C9BD6;
+  --chrome-line:  #3A362D;
+  --rule:    2px;
+  --radius:  0px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --cream:   #141210;
+    --paper:   #1F1C16;
+    --sheet:   #FFFFFF;  /* the score is a bright white page on the dark desk */
+    --ink:     #EDE8DC;
+    --muted:   #A09988;
+    --line:    #3B362B;
+    --red:     #E0503C;
+    --blue:    #7C9BD6;
+    --blue-soft: #7C9BD6;
+    --purple:  #B78FDD;
+    --brown:   #C9995F;
+    --green:   #62BB85;
+    --placeholder: #6F6858;
+    --chrome:       #0D0B08;
+    --chrome-text:  #F3F0E7;
+    --chrome-muted: #8AA5D8;
+    --chrome-line:  #2E2A22;
+  }
+}
+*{ box-sizing:border-box; }
+html{ -webkit-text-size-adjust:100%; }
+body{
+  margin:0;
+  background:var(--cream);
+  color:var(--ink);
+  font-family:"Archivo", sans-serif;
+  line-height:1.5;
+}
+h1,h2,h3, .display{
+  font-family:"Space Grotesk", sans-serif;
+  font-weight:600;
+  letter-spacing:-0.01em;
+  margin:0;
+}
+button, select, input{ font-family:inherit; }
+button, select, input, label{
+  -webkit-tap-highlight-color:transparent;
+}
+a{ color:var(--ink); }
+:focus-visible{
+  outline:3px solid var(--blue);
+  outline-offset:2px;
+}
+/* ---------- shapes (functional, not decorative) ---------- */
+.shape{ display:inline-block; flex-shrink:0; }
+.shape.circle{ border-radius:50%; }
+.shape.triangle{
+  width:0; height:0;
+  background:transparent !important;
+  border-top:9px solid transparent;
+  border-bottom:9px solid transparent;
+  border-left:14px solid currentColor;
+}
+.shape.square{ border-radius:var(--radius); }
+/* small instrument glyphs — one geometric mark per instrument */
+.glyph{ display:inline-block; width:10px; height:10px; flex-shrink:0; }
+.glyph.g-square{ width:11px; height:11px; border:2px solid var(--chrome-text); background:transparent; }
+.glyph.g-circle{ background:var(--chrome-text); border-radius:50%; }
+.glyph.g-diamond{ background:var(--green); transform:rotate(45deg) scale(.85); }
+.glyph.g-triangle{
+  width:0; height:0; background:transparent;
+  border-top:6px solid transparent;
+  border-bottom:6px solid transparent;
+  border-left:11px solid var(--blue-soft);
+}
+/* ---------- header ---------- */
+header{
+  background:var(--chrome);
+  color:var(--chrome-text);
+  padding:20px clamp(16px,4vw,40px);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:20px;
+  box-shadow:0 2px 0 var(--red);
+}
+.brand{ display:flex; align-items:center; gap:14px; }
+.brand-marks{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:0;
+  width:34px; height:34px;
+  border:1.5px solid var(--chrome-text);
+  flex-shrink:0;
+}
+.brand-marks .triangle{ color:var(--red); transform:scale(0.85); }
+.brand-text h1{ font-size:clamp(20px,3vw,26px); color:var(--chrome-text); }
+.brand-text p{ margin:2px 0 0; font-size:12.5px; color:var(--chrome-muted); }
+header .tagline{
+  font-size:13px;
+  max-width:260px;
+  text-align:right;
+  color:var(--chrome-muted);
+  display:none;
+}
+@media (min-width:760px){ header .tagline{ display:block; } }
+/* ---------- layout ---------- */
+main{
+  display:grid;
+  grid-template-columns: minmax(300px, 38%) 1fr;
+  gap:var(--rule);
+  background:var(--chrome);
+  padding:0;
+}
+@media (max-width:900px){
+  main{ grid-template-columns: 1fr; }
+}
+section.pane{
+  background:var(--paper);
+  padding:clamp(16px,3vw,28px);
+  min-width:0;
+}
+.pane-head{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:16px;
+  border-bottom:1.5px solid var(--ink);
+  padding-bottom:10px;
+}
+.pane-head h2{ font-size:17px; }
+.pane-head-left{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.pane-head .count{ font-size:12px; color:var(--blue); font-variant-numeric:tabular-nums; }
+/* ---------- bauhaus toggle ---------- */
+.toggle-row{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  font-size:12px;
+  color:var(--green);
+  font-weight:600;
+  cursor:pointer;
+  user-select:none;
+  touch-action:manipulation;
+}
+.toggle-row input{
+  position:absolute;
+  opacity:0;
+  width:1px; height:1px;
+  margin:0;
+}
+.bt-track{
+  width:36px; height:18px;
+  border:2px solid var(--ink);
+  background:var(--paper);
+  position:relative;
+  display:block;
+  flex-shrink:0;
+  transition:background .15s ease, border-color .15s ease;
+}
+.bt-thumb{
+  position:absolute;
+  top:2px; left:2px;
+  width:10px; height:10px;
+  background:var(--ink);
+  display:block;
+  transition:transform .15s ease, background .15s ease, border-radius .15s ease;
+}
+.toggle-row input:checked ~ .bt-track{ background:var(--red); border-color:var(--red); }
+.toggle-row input:checked ~ .bt-track .bt-thumb{
+  transform:translateX(18px);
+  background:var(--paper);
+  border-radius:50%;
+}
+.toggle-row input:focus-visible ~ .bt-track{
+  outline:3px solid var(--blue);
+  outline-offset:2px;
+}
+/* ---------- editor ---------- */
+.editor-wrap{
+  display:grid;
+  width:100%;
+}
+.editor-wrap > #abc-input,
+.editor-wrap > #abc-highlight{
+  grid-area:1 / 1 / 2 / 2;
+  width:100%;
+  min-height:360px;
+  padding:16px;
+  margin:0;
+  border:1.5px solid transparent;
+  font-family:"JetBrains Mono", "Consolas", monospace;
+  font-weight:700;
+  font-size:13.5px;
+  letter-spacing:-0.01em;
+  line-height:1.7;
+  white-space:pre-wrap;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+  box-sizing:border-box;
+}
+#abc-highlight{
+  background:var(--paper);
+  border-color:var(--ink);
+  color:var(--ink);
+  overflow:hidden;
+  pointer-events:none;
+  user-select:none;
+}
+#abc-input{
+  resize:vertical;
+  background:transparent;
+  color:transparent;
+  caret-color:var(--ink);
+  border-color:transparent;
+  position:relative;
+  z-index:1;
+}
+#abc-input::placeholder{ color:var(--placeholder); -webkit-text-fill-color:var(--placeholder); font-weight:600; }
+#abc-input:focus{ outline:none; }
+.editor-wrap:focus-within #abc-highlight{ border-color:var(--blue); }
+.tok-field{ color:var(--blue); font-weight:800; }
+.tok-header-value{ color:var(--ink); }
+.tok-voice{ color:var(--purple); font-weight:800; }
+.tok-comment{ color:var(--muted); font-style:italic; font-weight:600; }
+.tok-lyric{ color:var(--blue); font-style:italic; }
+.tok-chord{ color:var(--red); font-weight:800; }
+.tok-deco{ color:var(--red); font-style:italic; font-weight:600; }
+.tok-bar{ color:var(--brown); font-weight:800; }
+.tok-measure{
+  color:var(--green);
+  font-size:9px;
+  font-weight:800;
+  vertical-align:top;
+  position:relative;
+  top:-1px;
+  margin:0 1px;
+}
+.field-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:18px;
+}
+/* ---------- bauhaus buttons ---------- */
+.btn{
+  appearance:none;
+  border:2px solid var(--ink);
+  background:var(--paper);
+  color:var(--ink);
+  padding:11px 14px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+  cursor:pointer;
+  border-radius:var(--radius);
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  box-shadow:3px 3px 0 var(--ink);
+  transition:transform .07s ease, box-shadow .07s ease, background .12s ease, color .12s ease;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+.btn:active{
+  transform:translate(3px,3px);
+  box-shadow:0 0 0 transparent;
+}
+.btn.accent{ background:var(--red); border-color:var(--ink); color:var(--paper); }
+.btn:disabled{ opacity:.45; cursor:not-allowed; }
+@media (hover:hover) and (pointer:fine){
+  .btn:hover{ background:var(--ink); color:var(--paper); }
+  .btn.accent:hover{ background:var(--ink); color:var(--paper); }
+  .btn:disabled:hover{ background:var(--paper); color:var(--ink); }
+}
+.btn-mark{ display:inline-block; width:9px; height:9px; flex-shrink:0; }
+.btn-mark.circle{ border-radius:50%; }
+.btn-mark.square{ border-radius:0; }
+.btn-mark.m-paper{ background:var(--paper); }
+.btn-mark.m-soft{ background:var(--blue-soft); }
+.btn-mark.m-tri{
+  width:0; height:0;
+  background:transparent;
+  border-top:5px solid transparent;
+  border-bottom:5px solid transparent;
+  border-left:9px solid var(--red);
+}
+section.pane.drag-over{ outline:2px dashed var(--blue); outline-offset:-2px; }
+input[type="file"]{ display:none; }
+/* ---------- score pane ---------- */
+#paper{
+  background:var(--sheet);
+  min-height:220px;
+  overflow-x:auto;
+}
+#paper svg{ max-width:100%; }
+.abcjs-highlight{ fill:var(--red) !important; }
+.score-empty{
+  border:1.5px dashed #DEDACF;
+  padding:32px 20px;
+  text-align:center;
+  color:#1B4C9C;
+  font-size:14px;
+}
+/* ---------- transport ---------- */
+footer{
+  background:var(--chrome);
+  color:var(--chrome-text);
+  padding:18px clamp(16px,4vw,40px) 26px;
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
+.transport-row{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  flex-wrap:wrap;
+}
+.transport-controls{ display:flex; align-items:center; gap:10px; }
+.round-btn{
+  width:46px;
+  height:46px;
+  border-radius:50%;
+  border:2px solid var(--chrome-text);
+  background:transparent;
+  color:var(--chrome-text);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+/* play/pause is a hard red block — square against the stop circle */
+.round-btn.primary{
+  background:var(--red);
+  border-color:var(--red);
+  border-radius:var(--radius);
+}
+.round-btn.primary .triangle{
+  border-top:11px solid transparent;
+  border-bottom:11px solid transparent;
+  border-left:17px solid currentColor;
+  margin-left:3px;
+}
+.round-btn.primary.is-playing .triangle{ display:none; }
+.round-btn.primary .bars{ display:none; gap:5px; }
+.round-btn.primary.is-playing .bars{ display:flex; }
+.round-btn.primary .bars span{ width:5px; height:17px; background:var(--chrome-text); display:block; }
+.round-btn:disabled{ opacity:.4; cursor:not-allowed; }
+.round-btn:active:not(:disabled){ transform:scale(.94); }
+@media (hover:hover) and (pointer:fine){
+  .round-btn:hover:not(:disabled){ background:var(--blue); border-color:var(--blue); }
+}
+.round-btn .square{ width:14px; height:14px; background:currentColor; }
+.transport-group{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.transport-group .tg-label{ font-size:12px; color:var(--chrome-muted); }
+/* ---------- custom instrument menu ---------- */
+.inst-menu{ position:relative; }
+.inst-trigger{
+  appearance:none;
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  background:transparent;
+  color:var(--chrome-text);
+  border:2px solid var(--chrome-text);
+  padding:9px 12px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+  cursor:pointer;
+  border-radius:var(--radius);
+  box-shadow:3px 3px 0 var(--chrome-text);
+  transition:transform .07s ease, box-shadow .07s ease;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+.inst-trigger:active{ transform:translate(3px,3px); box-shadow:0 0 0 transparent; }
+.inst-name{ max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.inst-caret{
+  width:0; height:0; flex-shrink:0;
+  border-left:5px solid transparent;
+  border-right:5px solid transparent;
+  border-bottom:7px solid currentColor; /* caret points up — the menu rises from the bar */
+}
+.inst-options{
+  position:absolute;
+  bottom:calc(100% + 10px);
+  left:0;
+  min-width:232px;
+  background:var(--chrome);
+  border:2px solid var(--chrome-text);
+  box-shadow:4px 4px 0 var(--red);
+  z-index:60;
+  display:flex;
+  flex-direction:column;
+  padding:0;
+  margin:0;
+}
+.inst-options[hidden]{ display:none; }
+.inst-option{
+  appearance:none;
+  border:none;
+  border-top:1px solid var(--chrome-line);
+  background:transparent;
+  color:var(--chrome-text);
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:11px 14px;
+  font-size:12px;
+  font-weight:600;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  cursor:pointer;
+  text-align:left;
+  border-radius:0;
+  -webkit-tap-highlight-color:transparent;
+}
+.inst-option:first-child{ border-top:none; }
+.inst-option[aria-selected="true"]{ background:var(--red); font-weight:700; }
+.inst-option:active{ background:var(--red); }
+@media (hover:hover) and (pointer:fine){
+  .inst-option:hover{ background:var(--chrome-line); }
+  .inst-option[aria-selected="true"]:hover{ background:var(--red); }
+}
+#status-line{
+  font-size:12px;
+  color:var(--chrome-muted);
+  min-height:16px;
+}
+#status-line.error{ color:var(--red); font-weight:600; }
+.downloads{
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
+  padding-top:14px;
+  border-top:1px solid var(--chrome-line);
+}
+.downloads .btn{
+  border-color:var(--chrome-text);
+  background:transparent;
+  color:var(--chrome-text);
+  box-shadow:3px 3px 0 var(--chrome-text);
+}
+@media (hover:hover) and (pointer:fine){
+  .downloads .btn:hover{ background:var(--chrome-text); color:var(--chrome); }
+}
+#midi-download-holder a{
+  border:2px solid var(--chrome-text);
+  color:var(--chrome-text);
+  text-decoration:none;
+  padding:10px 16px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+  display:inline-flex;
+  align-items:center;
+  box-shadow:3px 3px 0 var(--chrome-text);
+  -webkit-tap-highlight-color:transparent;
+}
+#midi-download-holder a:active{ transform:translate(3px,3px); box-shadow:none; }
+@media (hover:hover) and (pointer:fine){
+  #midi-download-holder a:hover{ background:var(--chrome-text); color:var(--chrome); }
+}
+@media (prefers-reduced-motion: reduce){
+  *{ transition:none !important; animation:none !important; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="brand-marks">
+      <span class="shape triangle"></span>
+    </div>
+    <div class="brand-text">
+      <h1>ABC Composer</h1>
+      <p>write in abc notation, see the score, hear it played back</p>
+    </div>
+  </div>
+  <p class="tagline">a small tool for writing tunes: type standard abc notation on the left, get a formatted score and instrument playback on the right.</p>
+</header>
+<main>
+  <section class="pane" aria-labelledby="editor-heading">
+    <div class="pane-head">
+      <div class="pane-head-left">
+        <h2 id="editor-heading">notation</h2>
+        <label class="toggle-row" for="measure-toggle">
+          <input type="checkbox" id="measure-toggle">
+          <span class="bt-track" aria-hidden="true"><span class="bt-thumb"></span></span>
+          <span>measure numbers</span>
+        </label>
+      </div>
+      <span class="count" id="char-count">0 characters</span>
+    </div>
+    <div class="editor-wrap">
+      <pre id="abc-highlight" aria-hidden="true"><code id="abc-highlight-code"></code></pre>
+      <textarea id="abc-input" spellcheck="false" aria-label="ABC notation source" placeholder="X:1&#10;T:Untitled&#10;M:4/4&#10;L:1/8&#10;Q:1/4=120&#10;K:C&#10;C D E F | G A B c |]"></textarea>
+    </div>
+    <div class="field-row">
+      <button class="btn accent" id="render-btn"><span class="btn-mark circle m-paper"></span>render score</button>
+      <button class="btn" id="upload-btn"><span class="btn-mark circle m-soft"></span>upload .abc / .txt</button>
+      <input type="file" id="file-input" accept=".abc,.txt,text/plain">
+      <button class="btn" id="download-abc"><span class="btn-mark m-tri"></span>download .abc</button>
+      <button class="btn" id="download-svg"><span class="btn-mark square m-soft"></span>download score (svg)</button>
+    </div>
+    <p style="margin:12px 0 0; font-size:12px; color:var(--blue);">or drag a .abc / .txt file into this panel</p>
+  </section>
+  <section class="pane" aria-labelledby="score-heading">
+    <div class="pane-head">
+      <h2 id="score-heading">score</h2>
+      <span class="count" id="tune-title">—</span>
+    </div>
+    <div id="paper"><p class="score-empty">your rendered score will appear here.</p></div>
+    <div id="audio-target" style="display:none"></div>
+  </section>
+</main>
+<footer>
+  <div class="transport-row">
+    <div class="transport-controls">
+      <button class="round-btn primary" id="play-btn" aria-label="play">
+        <span class="shape triangle"></span>
+        <span class="bars"><span></span><span></span></span>
+      </button>
+      <button class="round-btn" id="stop-btn" aria-label="stop">
+        <span class="shape square"></span>
+      </button>
+    </div>
+    <div class="transport-group">
+      <span class="tg-label">instrument</span>
+      <div class="inst-menu" id="inst-menu">
+        <button type="button" class="inst-trigger" id="inst-trigger" aria-haspopup="listbox" aria-expanded="false">
+          <span class="glyph g-square" id="inst-trigger-glyph"></span>
+          <span class="inst-name" id="inst-trigger-name">acoustic grand piano</span>
+          <span class="inst-caret" aria-hidden="true"></span>
+        </button>
+        <div class="inst-options" id="inst-options" role="listbox" aria-label="instrument" hidden></div>
+      </div>
+    </div>
+  </div>
+  <div id="status-line" role="status">loading audio engine…</div>
+  <div class="downloads">
+    <button class="btn" id="download-midi-btn">download midi</button>
+    <button class="btn" id="download-wav-btn">download wav</button>
+    <span id="midi-download-holder"></span>
+  </div>
+</footer>
+<script>
+(function(){
+/* ---------------------------------------------------------
+   Elements
+--------------------------------------------------------- */
+const abcInput         = document.getElementById('abc-input');
+const highlightCode    = document.getElementById('abc-highlight-code');
+const measureToggle    = document.getElementById('measure-toggle');
+const editorPane       = document.getElementById('editor-heading').closest('.pane');
+const uploadBtn        = document.getElementById('upload-btn');
+const fileInput        = document.getElementById('file-input');
+const charCount        = document.getElementById('char-count');
+const tuneTitle        = document.getElementById('tune-title');
+const paperEl          = document.getElementById('paper');
+const renderBtn        = document.getElementById('render-btn');
+const playBtn          = document.getElementById('play-btn');
+const stopBtn          = document.getElementById('stop-btn');
+const statusLine       = document.getElementById('status-line');
+const downloadAbcBtn   = document.getElementById('download-abc');
+const downloadSvgBtn   = document.getElementById('download-svg');
+const downloadMidiBtn  = document.getElementById('download-midi-btn');
+const downloadWavBtn   = document.getElementById('download-wav-btn');
+const midiHolder       = document.getElementById('midi-download-holder');
+const instMenu         = document.getElementById('inst-menu');
+const instTrigger      = document.getElementById('inst-trigger');
+const instOptions      = document.getElementById('inst-options');
+const instTriggerName  = document.getElementById('inst-trigger-name');
+const instTriggerGlyph = document.getElementById('inst-trigger-glyph');
+
+const SOUNDFONT_URL = "https://paulrosen.github.io/midi-js-soundfonts/abcjs/";
+
+let tuneObjects  = [];
+let synthControl = null;
+let audioReady   = false;
+let isPlaying    = false;
+
+function setStatus(msg, isError){
+  statusLine.textContent = msg;
+  statusLine.classList.toggle('error', !!isError);
+}
+
+/* ---------------------------------------------------------
+   Instruments — gentle sine synth removed; each of the four
+   gets its own geometric mark in the custom menu
+--------------------------------------------------------- */
+const INSTRUMENTS = [
+  { program: 0,  name: 'acoustic grand piano', glyph: 'square'   },
+  { program: 24, name: 'nylon guitar',         glyph: 'triangle' },
+  { program: 12, name: 'music box',            glyph: 'circle'   },
+  { program: 11, name: 'vibraphone',           glyph: 'diamond'  }
+];
+let currentProgram = 0;
+function instrumentByProgram(p){
+  return INSTRUMENTS.find(i => i.program === p) || INSTRUMENTS[0];
+}
+function currentInstrumentProgram(){
+  return currentProgram;
+}
+const optionButtons = [];
+INSTRUMENTS.forEach(inst => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'inst-option';
+  b.setAttribute('role', 'option');
+  b.dataset.program = String(inst.program);
+  b.innerHTML = '<span class="glyph g-' + inst.glyph + '"></span>' + escapeHtml(inst.name);
+  b.addEventListener('click', () => chooseInstrument(inst.program));
+  instOptions.appendChild(b);
+  optionButtons.push(b);
+});
+function renderInstrumentUI(){
+  const inst = instrumentByProgram(currentProgram);
+  instTriggerName.textContent = inst.name;
+  instTriggerGlyph.className = 'glyph g-' + inst.glyph;
+  optionButtons.forEach(b => {
+    b.setAttribute('aria-selected', String(parseInt(b.dataset.program, 10) === currentProgram));
+  });
+}
+function openInstMenu(){
+  instOptions.hidden = false;
+  instTrigger.setAttribute('aria-expanded', 'true');
+}
+function closeInstMenu(){
+  instOptions.hidden = true;
+  instTrigger.setAttribute('aria-expanded', 'false');
+}
+instTrigger.addEventListener('click', () => {
+  uiSound('menu');
+  instOptions.hidden ? openInstMenu() : closeInstMenu();
+});
+async function chooseInstrument(program){
+  closeInstMenu();
+  instTrigger.focus();
+  if (program === currentProgram) return;
+  currentProgram = program;
+  renderInstrumentUI();
+  uiSound('select');
+  saveState();
+  if (!audioReady){ initAudio(); }
+  if (!synthControl || !tuneObjects.length) return;
+  if (isPlaying){ synthControl.pause(); isPlaying = false; updatePlayButton(); }
+  setStatus('switching instrument…');
+  await loadTuneIntoSynth(true);
+}
+document.addEventListener('click', (e) => {
+  if (!instMenu.contains(e.target)) closeInstMenu();
+});
+instMenu.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape'){
+    closeInstMenu();
+    instTrigger.focus();
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    if (instOptions.hidden) openInstMenu();
+    const idx = optionButtons.indexOf(document.activeElement);
+    const next = e.key === 'ArrowDown'
+      ? Math.min(optionButtons.length - 1, idx + 1)
+      : Math.max(0, idx <= 0 ? 0 : idx - 1);
+    optionButtons[next].focus();
+  }
+});
+
+/* ---------------------------------------------------------
+   Local storage — autosave the session so a crash, a force
+   quit, or iOS closing the home-screen app never loses work
+--------------------------------------------------------- */
+const STORAGE_KEY = 'abc-composer-state-v1';
+function saveState(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      text: abcInput.value,
+      instrument: currentProgram,
+      measures: measureToggle.checked,
+      savedAt: Date.now()
+    }));
+  }catch(err){ /* storage unavailable — nothing to do */ }
+}
+function restoreState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    let restored = false;
+    if (typeof s.text === 'string' && s.text.length){
+      abcInput.value = s.text;
+      restored = true;
+    }
+    if (INSTRUMENTS.some(i => i.program === Number(s.instrument))){
+      currentProgram = Number(s.instrument);
+    }
+    if (typeof s.measures === 'boolean') measureToggle.checked = s.measures;
+    return restored;
+  }catch(err){ return false; }
+}
+function debounce(fn, ms){
+  let t;
+  return function(...args){
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+/* ---------------------------------------------------------
+   UI sounds — one short natural tone per button type,
+   synthesized with Web Audio. iOS suspends/interrupts audio
+   contexts when the app is left, so every context is re-woken
+   on visibility change and on the very next touch/keystroke.
+--------------------------------------------------------- */
+let uiCtx = null;
+function uiAudio(){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!uiCtx || uiCtx.state === 'closed') uiCtx = new AC();
+    if (uiCtx.state !== 'running'){
+      /* covers both 'suspended' and iOS 'interrupted' */
+      try{ uiCtx.resume(); }catch(err){}
+    }
+    return uiCtx;
+  }catch(err){ return null; }
+}
+function wakeAudio(){
+  try{
+    if (uiCtx && uiCtx.state !== 'running') uiCtx.resume();
+  }catch(err){}
+}
+function blip(ctx, opts){
+  opts = opts || {};
+  const type = opts.type || 'sine';
+  const from = opts.from || 440;
+  const to   = opts.to || null;
+  const dur  = opts.dur  || 0.08;
+  const vol  = opts.vol  || 0.06;
+  const when = opts.when || 0;
+  const t0 = ctx.currentTime + when;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(from, t0);
+  if (to) osc.frequency.exponentialRampToValueAtTime(to, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g);
+  g.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.03);
+}
+async function uiSound(name){
+  try{
+    const ctx = uiAudio();
+    if (!ctx) return;
+    if (ctx.state !== 'running'){
+      try{ await ctx.resume(); }catch(err){}
+    }
+    switch(name){
+      case 'play':        /* rising fifth: go */
+        blip(ctx, {type:'triangle', from:523.25, dur:0.07, vol:0.07});
+        blip(ctx, {type:'triangle', from:783.99, dur:0.09, vol:0.07, when:0.07});
+        break;
+      case 'pause':       /* falling fifth: hold */
+        blip(ctx, {type:'triangle', from:783.99, dur:0.07, vol:0.07});
+        blip(ctx, {type:'triangle', from:523.25, dur:0.09, vol:0.07, when:0.07});
+        break;
+      case 'stop':        /* low thud */
+        blip(ctx, {type:'sine', from:196, to:98, dur:0.16, vol:0.09});
+        break;
+      case 'render':      /* bright two-step click */
+        blip(ctx, {type:'square', from:987.77, dur:0.045, vol:0.04});
+        blip(ctx, {type:'sine', from:1318.5, dur:0.08, vol:0.05, when:0.045});
+        break;
+      case 'upload':      /* upward pop */
+        blip(ctx, {type:'sine', from:330, to:660, dur:0.1, vol:0.07});
+        break;
+      case 'menu':        /* quick high tick for the instrument menu */
+        blip(ctx, {type:'square', from:1244.51, dur:0.03, vol:0.035});
+        break;
+      case 'select':      /* soft mid blip */
+        blip(ctx, {type:'sine', from:587.33, dur:0.07, vol:0.06});
+        break;
+      case 'dl-abc':      /* descending A–E */
+        blip(ctx, {type:'sine', from:880, dur:0.06, vol:0.06});
+        blip(ctx, {type:'sine', from:659.25, dur:0.09, vol:0.06, when:0.06});
+        break;
+      case 'dl-svg':      /* descending G–D */
+        blip(ctx, {type:'sine', from:783.99, dur:0.06, vol:0.06});
+        blip(ctx, {type:'sine', from:587.33, dur:0.09, vol:0.06, when:0.06});
+        break;
+      case 'dl-midi':     /* descending three-note arp */
+        blip(ctx, {type:'triangle', from:1046.5, dur:0.05, vol:0.05});
+        blip(ctx, {type:'triangle', from:880, dur:0.05, vol:0.05, when:0.05});
+        blip(ctx, {type:'triangle', from:1318.5, dur:0.08, vol:0.05, when:0.10});
+        break;
+      case 'dl-wav':      /* rising three-note arp */
+        blip(ctx, {type:'triangle', from:659.25, dur:0.05, vol:0.05});
+        blip(ctx, {type:'triangle', from:880, dur:0.05, vol:0.05, when:0.05});
+        blip(ctx, {type:'triangle', from:1318.5, dur:0.09, vol:0.05, when:0.10});
+        break;
+      case 'toggle-on':   /* crisp high tick */
+        blip(ctx, {type:'square', from:1567.98, dur:0.035, vol:0.04});
+        break;
+      case 'toggle-off':  /* softer lower tick */
+        blip(ctx, {type:'square', from:1046.5, dur:0.035, vol:0.04});
+        break;
+      default:
+        blip(ctx, {type:'sine', from:660, dur:0.05, vol:0.05});
+    }
+  }catch(err){ /* sounds are decorative — never break the app */ }
+}
+
+/* ---------------------------------------------------------
+   Syntax highlighting (overlay <pre> behind the textarea)
+--------------------------------------------------------- */
+const HEADER_FIELDS = "ABCDFGHIKLMNOPQRSTUVWXZ";
+function escapeHtml(s){
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function highlightLine(line, measureState, showMeasures){
+  if (line.length === 0) return '';
+  if (/^%/.test(line)){
+    return '<span class="tok-comment">' + escapeHtml(line) + '</span>';
+  }
+  const headerMatch = line.match(/^([A-Za-z]):(.*)$/);
+  if (headerMatch && HEADER_FIELDS.includes(headerMatch[1].toUpperCase())){
+    if (headerMatch[1].toUpperCase() === 'V'){
+      const idMatch = headerMatch[2].trim().match(/^\S+/);
+      const voiceId = idMatch ? idMatch[0] : 'default';
+      measureState.currentVoice = voiceId;
+      if (!(voiceId in measureState.counters)) measureState.counters[voiceId] = 0;
+      return '<span class="tok-voice">' + escapeHtml(headerMatch[1] + ':' + headerMatch[2]) + '</span>';
+    }
+    return '<span class="tok-field">' + escapeHtml(headerMatch[1] + ':') + '</span>' +
+           '<span class="tok-header-value">' + escapeHtml(headerMatch[2]) + '</span>';
+  }
+  if (/^w:/.test(line)){
+    return '<span class="tok-lyric">' + escapeHtml(line) + '</span>';
+  }
+  let html = escapeHtml(line);
+  html = html.replace(/"([^"]*)"/g, '<span class="tok-chord">"$1"</span>');
+  html = html.replace(/!([^!\s]+)!/g, '<span class="tok-deco">!$1!</span>');
+  html = html.replace(/(\[V:([^\]]*)\])|(\[\d+|\[\|\]?|\|\]|\|\||::|:\|\|?|\|:|\|)/gi,
+    (m, voiceTok, voiceVal, barTok) => {
+      if (voiceTok){
+        const idMatch = (voiceVal || '').trim().match(/^\S+/);
+        const voiceId = idMatch ? idMatch[0] : 'default';
+        measureState.currentVoice = voiceId;
+        if (!(voiceId in measureState.counters)) measureState.counters[voiceId] = 0;
+        return '<span class="tok-voice">' + voiceTok + '</span>';
+      }
+      let out = '';
+      if (showMeasures){
+        const key = measureState.currentVoice || '__default__';
+        if (!(key in measureState.counters)) measureState.counters[key] = 0;
+        measureState.counters[key] += 1;
+        out += '<span class="tok-measure">' + measureState.counters[key] + '</span>';
+      }
+      out += '<span class="tok-bar">' + barTok + '</span>';
+      return out;
+    });
+  return html;
+}
+function updateHighlight(){
+  const showMeasures = measureToggle.checked;
+  const measureState = { currentVoice: null, counters: {} };
+  const lines = abcInput.value.split('\n').map(line => highlightLine(line, measureState, showMeasures));
+  highlightCode.innerHTML = lines.join('\n') + '\n';
+}
+measureToggle.addEventListener('change', () => {
+  uiSound(measureToggle.checked ? 'toggle-on' : 'toggle-off');
+  updateHighlight();
+  saveState();
+});
+abcInput.addEventListener('scroll', () => {
+  document.getElementById('abc-highlight').scrollTop = abcInput.scrollTop;
+  document.getElementById('abc-highlight').scrollLeft = abcInput.scrollLeft;
+});
+if (typeof ResizeObserver !== 'undefined'){
+  new ResizeObserver(() => {
+    document.getElementById('abc-highlight').style.height = abcInput.offsetHeight + 'px';
+  }).observe(abcInput);
+}
+
+/* ---------------------------------------------------------
+   File upload (button + drag-and-drop)
+--------------------------------------------------------- */
+function loadFileText(file){
+  if (!file) return;
+  const okExtension = /\.(abc|txt)$/i.test(file.name);
+  if (!okExtension){
+    setStatus('please choose a .abc or .txt file.', true);
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    abcInput.value = String(reader.result);
+    charCount.textContent = abcInput.value.length + ' characters';
+    updateHighlight();
+    renderTune();
+    saveState();
+    setStatus('loaded ' + file.name);
+  };
+  reader.onerror = () => setStatus('could not read that file.', true);
+  reader.readAsText(file);
+}
+uploadBtn.addEventListener('click', () => {
+  uiSound('upload');
+  fileInput.click();
+});
+fileInput.addEventListener('change', () => {
+  loadFileText(fileInput.files && fileInput.files[0]);
+  fileInput.value = '';
+});
+['dragenter', 'dragover'].forEach(evt => {
+  editorPane.addEventListener(evt, (e) => {
+    e.preventDefault();
+    editorPane.classList.add('drag-over');
+  });
+});
+['dragleave', 'dragend'].forEach(evt => {
+  editorPane.addEventListener(evt, () => editorPane.classList.remove('drag-over'));
+});
+editorPane.addEventListener('drop', (e) => {
+  e.preventDefault();
+  editorPane.classList.remove('drag-over');
+  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) uiSound('upload');
+  loadFileText(file);
+});
+
+/* ---------------------------------------------------------
+   Rendering — the score sheet is always white with dark ink;
+   playback uses whatever tempo is written in the source (Q:)
+--------------------------------------------------------- */
+function renderTune(){
+  const src = abcInput.value;
+  if (!src.trim()){
+    paperEl.innerHTML = '<p class="score-empty">your rendered score will appear here.</p>';
+    tuneTitle.textContent = '—';
+    tuneObjects = [];
+    return;
+  }
+  try{
+    tuneObjects = ABCJS.renderAbc("paper", src, {
+      responsive: "resize",
+      add_classes: true,
+      foregroundColor: "#15130F",
+      paddingtop: 16,
+      paddingbottom: 16,
+      paddingleft: 16,
+      paddingright: 16,
+      staffwidth: 640,
+      format: {
+        titlefont: "Space Grotesk 22",
+        subtitlefont: "Archivo 14",
+        composerfont: "Archivo italic 13",
+        gchordfont: "Archivo bold 13",
+        annotationfont: "Archivo 12",
+        tempofont: "Archivo bold 13"
+      }
+    });
+    const t = tuneObjects[0];
+    tuneTitle.textContent = (t && t.metaText && t.metaText.title) ? t.metaText.title : 'untitled';
+    if (synthControl && audioReady){
+      loadTuneIntoSynth(false);
+    }
+  } catch(err){
+    setStatus('could not parse this ABC source — check the notation.', true);
+    console.error(err);
+  }
+}
+abcInput.addEventListener('input', () => {
+  charCount.textContent = abcInput.value.length + ' characters';
+  updateHighlight();
+});
+abcInput.addEventListener('input', debounce(renderTune, 500));
+abcInput.addEventListener('input', debounce(saveState, 400));
+renderBtn.addEventListener('click', () => {
+  uiSound('render');
+  renderTune();
+  saveState();
+});
+
+/* ---------------------------------------------------------
+   Cursor-following playback highlight
+--------------------------------------------------------- */
+let lastHighlighted = [];
+const cursorControl = {
+  onStart: function(){
+    isPlaying = true;
+    updatePlayButton();
+  },
+  onEvent: function(ev){
+    if (ev.measureStart && ev.left === null) return;
+    lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+    lastHighlighted = [];
+    if (ev.elements){
+      ev.elements.forEach(group => {
+        group.forEach(el => {
+          el.classList.add('abcjs-highlight');
+          lastHighlighted.push(el);
+        });
+      });
+    }
+  },
+  onFinished: function(){
+    isPlaying = false;
+    updatePlayButton();
+    lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+    lastHighlighted = [];
+  },
+  onBeat: function(){}
+};
+
+/* ---------------------------------------------------------
+   Audio / synth setup
+--------------------------------------------------------- */
+function initAudio(){
+  if (typeof ABCJS === 'undefined' || !ABCJS.synth || !ABCJS.synth.supportsAudio || !ABCJS.synth.supportsAudio()){
+    setStatus('this browser does not support Web Audio playback — try a recent Chrome, Firefox, Safari or Edge.', true);
+    playBtn.disabled = true;
+    stopBtn.disabled = true;
+    return;
+  }
+  synthControl = new ABCJS.synth.SynthController();
+  synthControl.load("#audio-target", cursorControl, {
+    displayLoop: false,
+    displayRestart: false,
+    displayPlay: false,
+    displayProgress: false,
+    displayWarp: false
+  });
+  audioReady = true;
+  setStatus('ready — press play to hear the score.');
+}
+function loadTuneIntoSynth(userAction){
+  if (!synthControl || !tuneObjects.length) return Promise.resolve();
+  return synthControl.setTune(tuneObjects[0], userAction, {
+    soundFontUrl: SOUNDFONT_URL,
+    program: currentInstrumentProgram(),
+    midiTranspose: 0
+  }).then(() => {
+    setStatus('ready — press play to hear the score.');
+  }).catch(err => {
+    setStatus('could not load the instrument sound — check your connection.', true);
+    console.error(err);
+  });
+}
+function updatePlayButton(){
+  playBtn.classList.toggle('is-playing', isPlaying);
+  playBtn.setAttribute('aria-label', isPlaying ? 'pause' : 'play');
+}
+
+/* ---------------------------------------------------------
+   Transport controls — playback always re-initialises inside
+   the tap gesture, which unlocks and re-wakes audio on iOS
+--------------------------------------------------------- */
+playBtn.addEventListener('click', async () => {
+  uiSound(isPlaying ? 'pause' : 'play');
+  if (!tuneObjects.length){
+    setStatus('render a score first.', true);
+    return;
+  }
+  if (!audioReady){
+    setStatus('starting audio engine…');
+    initAudio();
+  }
+  if (!synthControl) return;
+  try{
+    if (!isPlaying){
+      setStatus('loading instrument…');
+      await loadTuneIntoSynth(true);
+      await synthControl.play();
+      isPlaying = true;
+    } else {
+      synthControl.pause();
+      isPlaying = false;
+    }
+    updatePlayButton();
+  } catch(err){
+    setStatus('playback could not start — try again.', true);
+    console.error(err);
+  }
+});
+stopBtn.addEventListener('click', () => {
+  uiSound('stop');
+  if (!synthControl) return;
+  try{
+    synthControl.pause();
+    if (typeof synthControl.restart === 'function'){
+      synthControl.restart();
+    }
+  } catch(err){ /* no-op */ }
+  isPlaying = false;
+  updatePlayButton();
+  lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+  lastHighlighted = [];
+});
+
+/* ---------------------------------------------------------
+   Downloads
+--------------------------------------------------------- */
+function download(filename, content, mime){
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+downloadAbcBtn.addEventListener('click', () => {
+  uiSound('dl-abc');
+  download('tune.abc', abcInput.value, 'text/plain');
+});
+downloadSvgBtn.addEventListener('click', () => {
+  uiSound('dl-svg');
+  const svg = paperEl.querySelector('svg');
+  if (!svg){
+    setStatus('render a score first.', true);
+    return;
+  }
+  const serializer = new XMLSerializer();
+  let src = serializer.serializeToString(svg);
+  if (!src.match(/^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)){
+    src = src.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  download('score.svg', src, 'image/svg+xml');
+});
+downloadMidiBtn.addEventListener('click', () => {
+  uiSound('dl-midi');
+  if (!abcInput.value.trim()){
+    setStatus('render a score first.', true);
+    return;
+  }
+  try{
+    const html = ABCJS.synth.getMidiFile(abcInput.value, {
+      midiOutputType: "link",
+      downloadLabel: "download midi file",
+      fileName: "tune.mid",
+      program: currentInstrumentProgram()
+    });
+    midiHolder.innerHTML = html;
+  } catch(err){
+    setStatus('could not generate a midi file for this tune.', true);
+    console.error(err);
+  }
+});
+
+/* ---------------------------------------------------------
+   WAV export — abcjs renders the whole tune into one audio
+   buffer; we pull that buffer out, encode it as 16-bit PCM
+   WAV, and hand it over as a download
+--------------------------------------------------------- */
+function encodeWav(audioBuffer){
+  const numCh = Math.min(2, audioBuffer.numberOfChannels);
+  const sampleRate = audioBuffer.sampleRate;
+  const frames = audioBuffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = numCh * bytesPerSample;
+  const dataSize = frames * blockAlign;
+  const out = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(out);
+  const writeString = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numCh, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+  const channels = [];
+  for (let c = 0; c < numCh; c++) channels.push(audioBuffer.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < frames; i++){
+    for (let c = 0; c < numCh; c++){
+      const s = Math.max(-1, Math.min(1, channels[c][i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      off += 2;
+    }
+  }
+  return new Blob([out], { type: 'audio/wav' });
+}
+function extractAudioBuffer(cs){
+  const isAB = (b) => b && typeof b === 'object' &&
+    typeof b.getChannelData === 'function' &&
+    typeof b.numberOfChannels === 'number';
+  const cands = [];
+  try{
+    if (isAB(cs.buffer)) cands.push(cs.buffer);
+    if (Array.isArray(cs.buffers)) cs.buffers.forEach(b => { if (isAB(b)) cands.push(b); });
+    Object.keys(cs).forEach(k => { try{ if (isAB(cs[k])) cands.push(cs[k]); }catch(e){} });
+  }catch(err){}
+  if (!cands.length) return null;
+  cands.sort((a, b) => b.length - a.length); /* the full-tune buffer is by far the longest */
+  return cands[0];
+}
+let wavBusy = false;
+downloadWavBtn.addEventListener('click', async () => {
+  uiSound('dl-wav');
+  if (!tuneObjects.length){
+    setStatus('render a score first.', true);
+    return;
+  }
+  if (wavBusy) return;
+  wavBusy = true;
+  downloadWavBtn.disabled = true;
+  setStatus('rendering wav — hold on…');
+  try{
+    if (typeof ABCJS === 'undefined' || !ABCJS.synth || !ABCJS.synth.CreateSynth){
+      throw new Error('synth unavailable');
+    }
+    wakeAudio();
+    const cs = new ABCJS.synth.CreateSynth();
+    await cs.init({
+      visualObj: tuneObjects[0],
+      options: {
+        soundFontUrl: SOUNDFONT_URL,
+        program: currentInstrumentProgram(),
+        midiTranspose: 0
+      }
+    });
+    const buf = extractAudioBuffer(cs);
+    if (!buf) throw new Error('no audio buffer produced');
+    download('tune.wav', encodeWav(buf), 'audio/wav');
+    setStatus('wav saved.');
+  } catch(err){
+    setStatus('could not render a wav — try again.', true);
+    console.error(err);
+  } finally {
+    wavBusy = false;
+    downloadWavBtn.disabled = false;
+  }
+});
+
+/* ---------------------------------------------------------
+   App lifecycle — save on the way out, wake audio on the way
+   back in. iOS kills audio contexts when a home-screen web
+   app is left, so sound is restored on visibility change and
+   again on the very next touch/keystroke (capture phase, so
+   it runs before any button handler).
+--------------------------------------------------------- */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible'){
+    wakeAudio();
+    /* playback never survives iOS backgrounding — reset cleanly
+       so the next press of play starts fresh and audible */
+    if (isPlaying && synthControl){
+      try{ synthControl.pause(); }catch(err){ /* no-op */ }
+      isPlaying = false;
+      updatePlayButton();
+      lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+      lastHighlighted = [];
+    }
+  } else {
+    saveState();
+  }
+});
+window.addEventListener('pageshow', wakeAudio);
+window.addEventListener('pagehide', saveState);
+['pointerdown', 'keydown', 'touchend'].forEach(evt => {
+  document.addEventListener(evt, wakeAudio, { capture: true, passive: true });
+});
+
+/* ---------------------------------------------------------
+   Init — restore the saved session first, then render
+--------------------------------------------------------- */
+const restored = restoreState();
+renderInstrumentUI();
+charCount.textContent = abcInput.value.length + ' characters';
+updateHighlight();
+renderTune();
+initAudio();
+if (restored) setStatus('restored your last session — everything you were working on is here.');
+})();
+</script>
+</body>
+</html>
