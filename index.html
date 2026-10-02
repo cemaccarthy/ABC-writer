@@ -1,0 +1,1939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<link rel="apple-touch-icon" href="IMG_1146.jpeg">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ABC Composer</title>
+<meta name="description" content="A Bauhaus-styled ABC notation editor with score rendering and MIDI playback">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@600;700;800&display=swap" rel="stylesheet">
+<!-- abcjs: rendering + web-audio synth. @6 tracks the latest 6.x release. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/abcjs@6/dist/abcjs-audio.css">
+<script src="https://cdn.jsdelivr.net/npm/abcjs@6/dist/abcjs-basic-min.js"></script>
+<!-- abc2svg: score engraving with full ABC 2.1 decorations (piano pedal, dynamics, hairpins). Pinned version. -->
+<script src="https://cdn.jsdelivr.net/npm/abc2svg@1.22.1/abc2svg-1.js"></script>
+<style>
+:root{
+  --cream:   #F0EEE8;
+  --paper:   #FDFCFA;
+  --sheet:   #FDFCFA;   /* score surface */
+  --sheet-ink: #15130F; /* staff, notes and score text */
+  --ink:     #15130F;
+  --muted:   #6B675E;
+  --line:    #DEDACF;
+  --red:     #C41E2A;
+  --blue:    #1B4C9C;
+  --blue-soft: #7C9BD6;
+  --purple:  #6A3FA0;
+  --brown:   #8A5A2E;
+  --green:   #2E7D4F;
+  --placeholder: #ACA79A;
+  /* chrome = dark bars (header / footer / pane gaps) */
+  --chrome:       #15130F;
+  --chrome-text:  #FDFCFA;
+  --chrome-muted: #7C9BD6;
+  --chrome-line:  #3A362D;
+  --rule:    2px;
+  --radius:  0px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --cream:   #141210;
+    --paper:   #1F1C16;
+    --sheet:   #000000;  /* dark mode: black score page */
+    --sheet-ink: #FFFFFF; /* white staff, notes and musical text */
+    --ink:     #FFFFFF;
+    --muted:   #E3DFD3;
+    --line:    #3B362B;
+    --red:     #E0503C;
+    --blue:    #7C9BD6;
+    --blue-soft: #7C9BD6;
+    --purple:  #B78FDD;
+    --brown:   #C9995F;
+    --green:   #62BB85;
+    --placeholder: #6F6858;
+    --chrome:       #0D0B08;
+    --chrome-text:  #FFFFFF;
+    --chrome-muted: #C9D8F5;
+    --chrome-line:  #2E2A22;
+  }
+}
+*{ box-sizing:border-box; }
+html{ -webkit-text-size-adjust:100%; }
+body{
+  margin:0;
+  background:var(--cream);
+  color:var(--ink);
+  font-family:"Archivo", sans-serif;
+  line-height:1.5;
+}
+h1,h2,h3, .display{
+  font-family:"Space Grotesk", sans-serif;
+  font-weight:600;
+  letter-spacing:-0.01em;
+  margin:0;
+}
+button, select, input{ font-family:inherit; }
+button, select, input, label{
+  -webkit-tap-highlight-color:transparent;
+}
+a{ color:var(--ink); }
+:focus-visible{
+  outline:3px solid var(--blue);
+  outline-offset:2px;
+}
+/* ---------- shapes (functional, not decorative) ---------- */
+.shape{ display:inline-block; flex-shrink:0; }
+.shape.circle{ border-radius:50%; }
+.shape.triangle{
+  width:0; height:0;
+  background:transparent !important;
+  border-top:9px solid transparent;
+  border-bottom:9px solid transparent;
+  border-left:14px solid currentColor;
+}
+.shape.square{ border-radius:var(--radius); }
+/* small instrument glyphs — one geometric mark per instrument */
+.glyph{ display:inline-block; width:10px; height:10px; flex-shrink:0; }
+.glyph.g-square{ width:11px; height:11px; border:2px solid var(--chrome-text); background:transparent; }
+.glyph.g-circle{ background:var(--chrome-text); border-radius:50%; }
+.glyph.g-diamond{ background:var(--green); transform:rotate(45deg) scale(.85); }
+.glyph.g-triangle{
+  width:0; height:0; background:transparent;
+  border-top:6px solid transparent;
+  border-bottom:6px solid transparent;
+  border-left:11px solid var(--blue-soft);
+}
+.glyph.g-bar{ width:12px; height:5px; background:var(--green); }
+.glyph.g-ring{ width:11px; height:11px; border:2px solid var(--blue-soft); border-radius:50%; background:transparent; }
+/* ---------- header ---------- */
+header{
+  background:var(--chrome);
+  color:var(--chrome-text);
+  padding:20px clamp(16px,4vw,40px);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:20px;
+  box-shadow:0 2px 0 var(--red);
+}
+.brand{ display:flex; align-items:center; gap:14px; }
+.brand-marks{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:0;
+  width:34px; height:34px;
+  border:1.5px solid var(--chrome-text);
+  flex-shrink:0;
+}
+.brand-marks .triangle{ color:var(--red); transform:scale(0.85); }
+.brand-text h1{ font-size:clamp(20px,3vw,26px); color:var(--chrome-text); }
+.brand-text p{ margin:2px 0 0; font-size:12.5px; color:var(--chrome-muted); }
+header .tagline{
+  font-size:13px;
+  max-width:260px;
+  text-align:right;
+  color:var(--chrome-muted);
+  display:none;
+}
+@media (min-width:760px){ header .tagline{ display:block; } }
+/* ---------- layout ---------- */
+main{
+  display:grid;
+  grid-template-columns: minmax(300px, 38%) 1fr;
+  gap:var(--rule);
+  background:var(--chrome);
+  padding:0;
+}
+@media (max-width:900px){
+  main{ grid-template-columns: 1fr; }
+}
+section.pane{
+  background:var(--paper);
+  padding:clamp(16px,3vw,28px);
+  min-width:0;
+}
+.pane-head{
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:16px;
+  border-bottom:1.5px solid var(--ink);
+  padding-bottom:10px;
+}
+.pane-head h2{ font-size:17px; }
+.pane-head-left{ display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.pane-head .count{ font-size:12px; color:var(--blue); font-variant-numeric:tabular-nums; }
+/* ---------- bauhaus toggle ---------- */
+.toggle-row{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  font-size:12px;
+  color:var(--green);
+  font-weight:600;
+  cursor:pointer;
+  user-select:none;
+  touch-action:manipulation;
+}
+.toggle-row input{
+  position:absolute;
+  opacity:0;
+  width:1px; height:1px;
+  margin:0;
+}
+.bt-track{
+  width:36px; height:18px;
+  border:2px solid var(--ink);
+  background:var(--paper);
+  position:relative;
+  display:block;
+  flex-shrink:0;
+  transition:background .15s ease, border-color .15s ease;
+}
+.bt-thumb{
+  position:absolute;
+  top:2px; left:2px;
+  width:10px; height:10px;
+  background:var(--ink);
+  display:block;
+  transition:transform .15s ease, background .15s ease, border-radius .15s ease;
+}
+.toggle-row input:checked ~ .bt-track{ background:var(--red); border-color:var(--red); }
+.toggle-row input:checked ~ .bt-track .bt-thumb{
+  transform:translateX(18px);
+  background:var(--paper);
+  border-radius:50%;
+}
+.toggle-row input:focus-visible ~ .bt-track{
+  outline:3px solid var(--blue);
+  outline-offset:2px;
+}
+/* ---------- editor ---------- */
+.editor-wrap{
+  display:grid;
+  width:100%;
+}
+.editor-wrap > #abc-input,
+.editor-wrap > #abc-highlight{
+  grid-area:1 / 1 / 2 / 2;
+  width:100%;
+  min-height:360px;
+  padding:16px;
+  margin:0;
+  border:1.5px solid transparent;
+  font-family:"JetBrains Mono", "Consolas", monospace;
+  font-weight:700;
+  font-size:13.5px;
+  letter-spacing:-0.01em;
+  line-height:1.7;
+  white-space:pre-wrap;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+  box-sizing:border-box;
+}
+#abc-highlight{
+  background:var(--paper);
+  border-color:var(--ink);
+  color:var(--ink);
+  overflow:hidden;
+  pointer-events:none;
+  user-select:none;
+}
+#abc-input{
+  resize:vertical;
+  background:transparent;
+  color:transparent;
+  caret-color:var(--ink);
+  border-color:transparent;
+  position:relative;
+  z-index:1;
+}
+#abc-input::placeholder{ color:var(--placeholder); -webkit-text-fill-color:var(--placeholder); font-weight:600; }
+#abc-input:focus{ outline:none; }
+.editor-wrap:focus-within #abc-highlight{ border-color:var(--blue); }
+.tok-field{ color:var(--blue); font-weight:800; }
+.tok-header-value{ color:var(--ink); }
+.tok-voice{ color:var(--purple); font-weight:800; }
+.tok-comment{ color:var(--muted); font-style:italic; font-weight:600; }
+.tok-directive{ color:var(--purple); font-weight:800; }
+.tok-key{ color:var(--green); font-weight:800; }
+.tok-meter{ color:var(--brown); font-weight:800; }
+.tok-tempo{ color:var(--red); font-weight:800; }
+.tok-title{ color:var(--ink); font-weight:800; }
+.tok-note{ color:var(--ink); }
+.tok-acc{ color:var(--red); font-weight:800; }
+.tok-oct{ color:var(--blue-soft); font-weight:800; }
+.tok-dur{ color:var(--green); font-weight:800; }
+.tok-rest{ color:var(--muted); font-weight:800; }
+.tok-tie{ color:var(--blue); font-weight:800; }
+.tok-tuplet{ color:var(--green); font-weight:800; }
+.tok-grace{ color:var(--purple); font-style:italic; }
+.tok-broken{ color:var(--brown); font-weight:800; }
+.tok-chordbr{ color:var(--purple); font-weight:800; }
+.tok-inline{ color:var(--blue); font-weight:800; }
+.tok-annot{ color:var(--green); font-style:italic; font-weight:700; }
+.tok-dyn{ color:var(--green); font-weight:800; font-style:italic; }
+.tok-pedal{ color:var(--blue); font-weight:800; text-decoration:underline; text-decoration-thickness:2px; }
+.tok-short{ color:var(--red); font-weight:800; }
+.tok-lyric{ color:var(--blue); font-style:italic; }
+.tok-chord{ color:var(--red); font-weight:800; }
+.tok-deco{ color:var(--red); font-style:italic; font-weight:600; }
+.tok-bar{ color:var(--brown); font-weight:800; }
+.tok-measure{
+  color:var(--green);
+  font-size:9px;
+  font-weight:800;
+  vertical-align:top;
+  position:relative;
+  top:-1px;
+  margin:0 1px;
+}
+.field-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:18px;
+}
+/* ---------- bauhaus buttons ---------- */
+.btn{
+  appearance:none;
+  border:2px solid var(--ink);
+  background:var(--paper);
+  color:var(--ink);
+  padding:11px 14px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+  cursor:pointer;
+  border-radius:var(--radius);
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  box-shadow:3px 3px 0 var(--ink);
+  transition:transform .07s ease, box-shadow .07s ease, background .12s ease, color .12s ease;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+.btn:active{
+  transform:translate(3px,3px);
+  box-shadow:0 0 0 transparent;
+}
+.btn.accent{ background:var(--red); border-color:var(--ink); color:var(--paper); }
+.btn:disabled{ opacity:.45; cursor:not-allowed; }
+@media (hover:hover) and (pointer:fine){
+  .btn:hover{ background:var(--ink); color:var(--paper); }
+  .btn.accent:hover{ background:var(--ink); color:var(--paper); }
+  .btn:disabled:hover{ background:var(--paper); color:var(--ink); }
+}
+.btn-mark{ display:inline-block; width:9px; height:9px; flex-shrink:0; }
+.btn-mark.circle{ border-radius:50%; }
+.btn-mark.square{ border-radius:0; }
+.btn-mark.m-paper{ background:var(--paper); }
+.btn-mark.m-soft{ background:var(--blue-soft); }
+.btn-mark.m-tri{
+  width:0; height:0;
+  background:transparent;
+  border-top:5px solid transparent;
+  border-bottom:5px solid transparent;
+  border-left:9px solid var(--red);
+}
+section.pane.drag-over{ outline:2px dashed var(--blue); outline-offset:-2px; }
+input[type="file"]{ display:none; }
+/* ---------- score pane: A4 portrait sheets ----------
+   Every page is a real A4 sheet (793 x 1122 css px = 210 x 297 mm).
+   On screen the sheet is scaled to fit the pane (--k); when printing
+   or saving to pdf it is shown at 1:1, so the pdf matches the preview. */
+#paper{
+  background:var(--line);
+  padding:14px 10px;
+  min-height:220px;
+}
+#pager{
+  --k:1;
+  display:flex;
+  align-items:flex-start;
+  overflow-x:auto;
+  scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+  overscroll-behavior-x:contain;
+}
+#pager::-webkit-scrollbar{ display:none; }
+.score-page{ flex:0 0 100%; scroll-snap-align:start; scroll-snap-stop:always; min-width:0; }
+.sheet-fit{
+  width:calc(793px * var(--k));
+  height:calc(1122px * var(--k));
+  margin:0 auto;
+  background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.25), 0 8px 24px rgba(0,0,0,.18);
+  overflow:hidden;
+}
+.sheet{
+  position:relative;
+  width:793px;
+  height:1122px;
+  padding:57px 0 0;
+  background:#fff;
+  color:#15130F;               /* abc2svg draws everything in currentColor */
+  transform:scale(var(--k));
+  transform-origin:0 0;
+  overflow:hidden;
+  -webkit-print-color-adjust:exact;
+  print-color-adjust:exact;
+}
+.sheet svg{ display:block; width:793px; max-width:none; height:auto; }
+.sheet-foot{
+  position:absolute;
+  left:0; right:0; bottom:34px;
+  text-align:center;
+  font:italic 11px/1 Georgia, "Times New Roman", serif;
+  color:#6B675E;
+}
+#stage{ position:absolute; left:-9999px; top:0; width:793px; visibility:hidden; pointer-events:none; }
+#stage svg{ display:block; }
+#audio-src{ position:absolute; left:-9999px; top:0; width:800px; visibility:hidden; }
+#page-nav{ display:flex; align-items:center; justify-content:center; gap:14px; margin-top:12px; }
+#page-nav[hidden]{ display:none; }
+#page-nav .btn{ padding:6px 14px; font-size:16px; box-shadow:2px 2px 0 var(--ink); }
+#page-label{ font-size:12px; color:var(--blue); font-variant-numeric:tabular-nums; min-width:90px; text-align:center; }
+.score-empty{
+  border:1.5px dashed var(--muted);
+  padding:32px 20px;
+  text-align:center;
+  color:var(--blue);
+  background:var(--paper);
+  font-size:14px;
+  margin:0;
+}
+/* ---------- print / save as pdf: A4 portrait, just the sheets ---------- */
+@page{ size:A4 portrait; margin:0; }
+@media print{
+  html, body{ background:#fff !important; margin:0; padding:0; }
+  body > header, body > nav.tabs, body > footer, #guide,
+  #view-composer > section.pane:first-child,
+  #view-composer .pane-head, #page-nav, #stage, #audio-src, #audio-target{ display:none !important; }
+  #view-composer{ display:block !important; background:none; }
+  #view-composer > section.pane{ padding:0 !important; background:none !important; }
+  #paper{ background:none; padding:0; min-height:0; }
+  #pager{ display:block; overflow:visible; }
+  .score-page{ display:block; padding:0; break-after:page; page-break-after:always; break-inside:avoid; }
+  .score-page:last-child{ break-after:auto; page-break-after:auto; }
+  .sheet-fit{ width:793px; height:1122px; margin:0; box-shadow:none; }
+  .sheet{ transform:none; }
+}
+/* ---------- tabs + guide ---------- */
+.tabs{ display:flex; background:var(--chrome); padding:0 clamp(16px,4vw,40px); gap:6px; }
+.tab{
+  appearance:none; background:transparent; color:var(--chrome-muted);
+  border:none; border-bottom:3px solid transparent;
+  padding:12px 16px; font-size:12px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; cursor:pointer;
+}
+.tab[aria-selected="true"]{ color:var(--chrome-text); border-bottom-color:var(--red); }
+#guide{ background:var(--paper); padding:clamp(16px,3vw,28px); max-width:880px; margin:0 auto; }
+#guide[hidden]{ display:none; }
+#guide h2{ font-size:20px; margin-bottom:6px; }
+#guide h3{ font-size:15px; margin:22px 0 6px; padding-top:12px; border-top:1.5px solid var(--ink); }
+#guide p, #guide li{ font-size:14px; }
+#guide code{ font-family:"JetBrains Mono",monospace; font-weight:700; font-size:12.5px; background:var(--cream); padding:1px 5px; }
+#guide pre{ font-family:"JetBrains Mono",monospace; font-weight:700; font-size:12.5px; background:var(--cream); border:1.5px solid var(--ink); padding:12px; overflow-x:auto; margin:8px 0; }
+#guide table{ border-collapse:collapse; width:100%; font-size:13px; }
+#guide th, #guide td{ border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+main[hidden]{ display:none; }
+/* ---------- transport ---------- */
+footer{
+  background:var(--chrome);
+  color:var(--chrome-text);
+  padding:18px clamp(16px,4vw,40px) 26px;
+  display:flex;
+  flex-direction:column;
+  gap:16px;
+}
+.transport-row{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  flex-wrap:wrap;
+}
+.transport-controls{ display:flex; align-items:center; gap:10px; }
+.round-btn{
+  width:46px;
+  height:46px;
+  border-radius:50%;
+  border:2px solid var(--chrome-text);
+  background:transparent;
+  color:var(--chrome-text);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+/* play/pause is a hard red block — square against the stop circle */
+.round-btn.primary{
+  background:var(--red);
+  border-color:var(--red);
+  border-radius:var(--radius);
+}
+.round-btn.primary .triangle{
+  border-top:11px solid transparent;
+  border-bottom:11px solid transparent;
+  border-left:17px solid currentColor;
+  margin-left:3px;
+}
+.round-btn.primary.is-playing .triangle{ display:none; }
+.round-btn.primary .bars{ display:none; gap:5px; }
+.round-btn.primary.is-playing .bars{ display:flex; }
+.round-btn.primary .bars span{ width:5px; height:17px; background:var(--chrome-text); display:block; }
+.round-btn:disabled{ opacity:.4; cursor:not-allowed; }
+.round-btn:active:not(:disabled){ transform:scale(.94); }
+@media (hover:hover) and (pointer:fine){
+  .round-btn:hover:not(:disabled){ background:var(--blue); border-color:var(--blue); }
+}
+.round-btn .square{ width:14px; height:14px; background:currentColor; }
+.transport-group{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.transport-group .tg-label{ font-size:12px; color:var(--chrome-muted); }
+/* ---------- custom instrument menu ---------- */
+.inst-menu{ position:relative; }
+.inst-trigger{
+  appearance:none;
+  display:inline-flex;
+  align-items:center;
+  gap:9px;
+  background:transparent;
+  color:var(--chrome-text);
+  border:2px solid var(--chrome-text);
+  padding:9px 12px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+  cursor:pointer;
+  border-radius:var(--radius);
+  box-shadow:3px 3px 0 var(--chrome-text);
+  transition:transform .07s ease, box-shadow .07s ease;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+}
+.inst-trigger:active{ transform:translate(3px,3px); box-shadow:0 0 0 transparent; }
+.inst-name{ max-width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.inst-caret{
+  width:0; height:0; flex-shrink:0;
+  border-left:5px solid transparent;
+  border-right:5px solid transparent;
+  border-bottom:7px solid currentColor; /* caret points up — the menu rises from the bar */
+}
+.inst-options{
+  max-height:50vh; overflow-y:auto;
+  position:absolute;
+  bottom:calc(100% + 10px);
+  left:0;
+  min-width:232px;
+  background:var(--chrome);
+  border:2px solid var(--chrome-text);
+  box-shadow:4px 4px 0 var(--red);
+  z-index:60;
+  display:flex;
+  flex-direction:column;
+  padding:0;
+  margin:0;
+}
+.inst-options[hidden]{ display:none; }
+.inst-option{
+  appearance:none;
+  border:none;
+  border-top:1px solid var(--chrome-line);
+  background:transparent;
+  color:var(--chrome-text);
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:11px 14px;
+  font-size:12px;
+  font-weight:600;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  cursor:pointer;
+  text-align:left;
+  border-radius:0;
+  -webkit-tap-highlight-color:transparent;
+}
+.inst-option:first-child{ border-top:none; }
+.inst-option[aria-selected="true"]{ background:var(--red); font-weight:700; }
+.inst-option:active{ background:var(--red); }
+@media (hover:hover) and (pointer:fine){
+  .inst-option:hover{ background:var(--chrome-line); }
+  .inst-option[aria-selected="true"]:hover{ background:var(--red); }
+}
+#status-line{
+  font-size:12px;
+  color:var(--chrome-muted);
+  min-height:16px;
+}
+#status-line.error{ color:var(--red); font-weight:600; }
+.downloads{
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
+  padding-top:14px;
+  border-top:1px solid var(--chrome-line);
+}
+.downloads .btn{
+  border-color:var(--chrome-text);
+  background:transparent;
+  color:var(--chrome-text);
+  box-shadow:3px 3px 0 var(--chrome-text);
+}
+@media (hover:hover) and (pointer:fine){
+  .downloads .btn:hover{ background:var(--chrome-text); color:var(--chrome); }
+}
+#midi-download-holder a{
+  border:2px solid var(--chrome-text);
+  color:var(--chrome-text);
+  text-decoration:none;
+  padding:10px 16px;
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.07em;
+  text-transform:uppercase;
+  display:inline-flex;
+  align-items:center;
+  box-shadow:3px 3px 0 var(--chrome-text);
+  -webkit-tap-highlight-color:transparent;
+}
+#midi-download-holder a:active{ transform:translate(3px,3px); box-shadow:none; }
+@media (hover:hover) and (pointer:fine){
+  #midi-download-holder a:hover{ background:var(--chrome-text); color:var(--chrome); }
+}
+@media (prefers-reduced-motion: reduce){
+  *{ transition:none !important; animation:none !important; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="brand-marks">
+      <span class="shape triangle"></span>
+    </div>
+    <div class="brand-text">
+      <h1>ABC Composer</h1>
+      <p>write in abc notation, see the score, hear it played back</p>
+    </div>
+  </div>
+  <p class="tagline">a small tool for writing tunes: type standard abc notation on the left, get a formatted score and instrument playback on the right.</p>
+</header>
+<nav class="tabs" role="tablist">
+  <button class="tab" role="tab" id="tab-composer" data-tab="composer" aria-selected="true">composer</button>
+  <button class="tab" role="tab" id="tab-guide" data-tab="guide" aria-selected="false">notation guide</button>
+</nav>
+<main id="view-composer">
+  <section class="pane" aria-labelledby="editor-heading">
+    <div class="pane-head">
+      <div class="pane-head-left">
+        <h2 id="editor-heading">notation</h2>
+        <label class="toggle-row" for="measure-toggle">
+          <input type="checkbox" id="measure-toggle">
+          <span class="bt-track" aria-hidden="true"><span class="bt-thumb"></span></span>
+          <span>measure numbers</span>
+        </label>
+      </div>
+      <span class="count" id="char-count">0 characters</span>
+    </div>
+    <div class="editor-wrap">
+      <pre id="abc-highlight" aria-hidden="true"><code id="abc-highlight-code"></code></pre>
+      <textarea id="abc-input" spellcheck="false" aria-label="ABC notation source" placeholder="X:1&#10;T:Untitled&#10;M:4/4&#10;L:1/8&#10;Q:1/4=120&#10;K:C&#10;C D E F | G A B c |]"></textarea>
+    </div>
+    <div class="field-row">
+      <button class="btn accent" id="render-btn"><span class="btn-mark circle m-paper"></span>render score</button>
+      <button class="btn" id="upload-btn"><span class="btn-mark circle m-soft"></span>upload .abc / .txt</button>
+      <input type="file" id="file-input" accept=".abc,.txt,text/plain">
+      <button class="btn" id="download-abc"><span class="btn-mark m-tri"></span>download .abc</button>
+      <button class="btn" id="download-svg"><span class="btn-mark square m-soft"></span>download score (svg)</button>
+      <button class="btn accent" id="export-pdf"><span class="btn-mark square m-paper"></span>export pdf (a4)</button>
+    </div>
+    <p style="margin:12px 0 0; font-size:12px; color:var(--blue);">or drag a .abc / .txt file into this panel</p>
+  </section>
+  <section class="pane" aria-labelledby="score-heading">
+    <div class="pane-head">
+      <h2 id="score-heading">score</h2>
+      <span class="count" id="tune-title">—</span>
+    </div>
+    <div id="paper"><div id="pager" aria-label="score pages"><p class="score-empty" style="flex:0 0 100%">your rendered score will appear here.</p></div></div>
+    <div id="page-nav" hidden>
+      <button class="btn" id="page-prev" aria-label="previous page">&lsaquo;</button>
+      <span id="page-label">page 1 / 1</span>
+      <button class="btn" id="page-next" aria-label="next page">&rsaquo;</button>
+    </div>
+    <div id="stage" aria-hidden="true"></div>
+    <div id="audio-src" aria-hidden="true"></div>
+    <div id="audio-target" style="display:none"></div>
+  </section>
+</main>
+<section id="guide" hidden aria-labelledby="guide-h">
+  <h2 id="guide-h">notation guide: abc2svg</h2>
+  <p>The score is engraved by <strong>abc2svg</strong>, a full ABC 2.1 engine that understands piano pedal marks, dynamics and hairpins. Playback uses abcjs and the instrument you pick in the footer. The score is laid out on A4 portrait sheets exactly as it will print: long scores continue on further pages (swipe sideways or use the arrows), and <strong>export pdf</strong> saves those same pages. Voices without a clef always use treble unless you write one (<code>clef=bass</code>), so clefs never change on their own.</p>
+  <h3>piano pedal</h3>
+  <table>
+    <tr><th>write</th><th>meaning</th></tr>
+    <tr><td><code>!ped!</code></td><td>pedal down (Ped.), placed before the note it starts on</td></tr>
+    <tr><td><code>!ped-up!</code></td><td>pedal release (*)</td></tr>
+    <tr><td><code>!ped(!</code> &hellip; <code>!ped)!</code></td><td>pedal line: start and end of a bracket</td></tr>
+  </table>
+  <pre>X:1
+T:Pedal example
+M:4/4
+L:1/8
+%%score {RH | LH}
+V:RH clef=treble
+V:LH clef=bass
+K:C
+[V:RH] !ped!CEGc e2 c2 !ped-up!| !ped!dfad' a2 f2 !ped-up!|]
+[V:LH] !ped!C,2G,2 C2G,2 !ped-up!| D,2A,2 D2A,2|]</pre>
+  <p><button class="btn" id="load-pedal-example"><span class="btn-mark circle m-paper"></span>load this example</button></p>
+  <p>Playback follows the pedal: while it is down, notes you have already released keep sounding until the pedal comes up, and pressing it again clears the old sound. The downloaded midi file carries the sustain pedal too. Write the marks in the voice they belong to.</p>
+  <h3>piano staves</h3>
+  <p><code>%%score {RH | LH}</code> joins two voices with a brace (right hand, left hand). Give each voice a clef with <code>V:LH clef=bass</code>, then write each line starting with <code>[V:RH]</code> or <code>[V:LH]</code>.</p>
+  <h3>dynamics and hairpins</h3>
+  <table>
+    <tr><td><code>!p!</code> <code>!mp!</code> <code>!mf!</code> <code>!f!</code> <code>!ff!</code> <code>!sfz!</code></td><td>dynamic marks</td></tr>
+    <tr><td><code>!crescendo(!</code> &hellip; <code>!crescendo)!</code></td><td>hairpin getting louder</td></tr>
+    <tr><td><code>!diminuendo(!</code> &hellip; <code>!diminuendo)!</code></td><td>hairpin getting softer</td></tr>
+  </table>
+  <h3>other decorations</h3>
+  <table>
+    <tr><td><code>!fermata!</code> <code>!trill!</code> <code>!accent!</code> <code>!staccato!</code></td><td>long form, between exclamation marks</td></tr>
+    <tr><td><code>.</code> <code>~</code> <code>H</code> <code>T</code> <code>u</code> <code>v</code></td><td>short forms placed before a note: staccato, roll, fermata, trill, up bow, down bow</td></tr>
+    <tr><td><code>"C"</code> <code>"^text"</code></td><td>chord symbol; text above the staff (<code>^</code> above, <code>_</code> below)</td></tr>
+    <tr><td><code>{g}</code> <code>(3abc</code> <code>a&gt;b</code></td><td>grace note, triplet, dotted rhythm</td></tr>
+    <tr><td><code>|: :| [1 [2</code></td><td>repeats and first/second endings</td></tr>
+    <tr><td><code>[K:G]</code> <code>[M:3/4]</code></td><td>change key or meter in the middle of a line</td></tr>
+  </table>
+  <h3>editor colours</h3>
+  <p>Header letters and values (key, meter, tempo, title) each have their own colour. In the music: <strong>pitches</strong> plain, <strong>accidentals</strong> red, <strong>octave marks</strong> light blue, <strong>durations</strong> green, <strong>rests</strong> grey, <strong>slurs and ties</strong> blue, <strong>bar lines</strong> brown, <strong>pedal</strong> blue underlined, <strong>dynamics</strong> green italic, <strong>chords</strong> red, <strong>text annotations</strong> green italic, <strong>comments</strong> grey italic.</p>
+  <h3>ties</h3>
+  <p>Write a hyphen straight after the first note: <code>c4-c4</code>, <code>c4-|c4</code> or <code>[ce]-[ce]</code>. Both notes must be the same pitch, and a rest cannot be tied. A hyphen typed after a space (<code>c4 -c4</code>) or as a typographic dash is corrected for you.</p>
+  <h3>instruments</h3>
+  <p>Struck and plucked sounds suit the sustain pedal best: piano, electric piano, harpsichord, nylon guitar, pizzicato strings, harp, koto, music box, kalimba, celesta, glockenspiel, tinkle bell, tubular bells, vibraphone, marimba, xylophone, dulcimer and steel drums. Basic synth and warm synth pad are also available.</p>
+</section>
+<footer>
+  <div class="transport-row">
+    <div class="transport-controls">
+      <button class="round-btn primary" id="play-btn" aria-label="play">
+        <span class="shape triangle"></span>
+        <span class="bars"><span></span><span></span></span>
+      </button>
+      <button class="round-btn" id="stop-btn" aria-label="stop">
+        <span class="shape square"></span>
+      </button>
+    </div>
+    <div class="transport-group">
+      <span class="tg-label">instrument</span>
+      <div class="inst-menu" id="inst-menu">
+        <button type="button" class="inst-trigger" id="inst-trigger" aria-haspopup="listbox" aria-expanded="false">
+          <span class="glyph g-square" id="inst-trigger-glyph"></span>
+          <span class="inst-name" id="inst-trigger-name">acoustic grand piano</span>
+          <span class="inst-caret" aria-hidden="true"></span>
+        </button>
+        <div class="inst-options" id="inst-options" role="listbox" aria-label="instrument" hidden></div>
+      </div>
+    </div>
+  </div>
+  <div id="status-line" role="status">loading audio engine…</div>
+  <div class="downloads">
+    <button class="btn" id="download-midi-btn">download midi</button>
+    <button class="btn" id="download-wav-btn">download wav</button>
+    <span id="midi-download-holder"></span>
+  </div>
+</footer>
+<script>
+(function(){
+/* ---------------------------------------------------------
+   Elements
+--------------------------------------------------------- */
+const abcInput         = document.getElementById('abc-input');
+const highlightCode    = document.getElementById('abc-highlight-code');
+const measureToggle    = document.getElementById('measure-toggle');
+const editorPane       = document.getElementById('editor-heading').closest('.pane');
+const uploadBtn        = document.getElementById('upload-btn');
+const fileInput        = document.getElementById('file-input');
+const charCount        = document.getElementById('char-count');
+const tuneTitle        = document.getElementById('tune-title');
+const paperEl          = document.getElementById('paper');
+const renderBtn        = document.getElementById('render-btn');
+const playBtn          = document.getElementById('play-btn');
+const stopBtn          = document.getElementById('stop-btn');
+const statusLine       = document.getElementById('status-line');
+const downloadAbcBtn   = document.getElementById('download-abc');
+const downloadSvgBtn   = document.getElementById('download-svg');
+const downloadMidiBtn  = document.getElementById('download-midi-btn');
+const downloadWavBtn   = document.getElementById('download-wav-btn');
+const midiHolder       = document.getElementById('midi-download-holder');
+const instMenu         = document.getElementById('inst-menu');
+const instTrigger      = document.getElementById('inst-trigger');
+const instOptions      = document.getElementById('inst-options');
+const instTriggerName  = document.getElementById('inst-trigger-name');
+const instTriggerGlyph = document.getElementById('inst-trigger-glyph');
+
+const SOUNDFONT_URL = "https://paulrosen.github.io/midi-js-soundfonts/abcjs/";
+
+let tuneObjects  = [];
+let synthControl = null;
+let lastTuneSrc = '';   /* the normalised ABC text the score and audio were built from */
+let audioReady   = false;
+let isPlaying    = false;
+
+function setStatus(msg, isError){
+  statusLine.textContent = msg;
+  statusLine.classList.toggle('error', !!isError);
+}
+
+/* ---------------------------------------------------------
+   Instruments — gentle sine synth removed; each of the four
+   gets its own geometric mark in the custom menu
+--------------------------------------------------------- */
+const INSTRUMENTS = [
+  /* keys + plucked strings: a struck or plucked attack that rings, then fades */
+  { program: 0,   name: 'acoustic grand piano', glyph: 'square'   },
+  { program: 4,   name: 'electric piano',       glyph: 'square'   },
+  { program: 6,   name: 'harpsichord',          glyph: 'square'   },
+  { program: 24,  name: 'nylon guitar',         glyph: 'triangle' },
+  { program: 45,  name: 'pizzicato strings',    glyph: 'triangle' },
+  { program: 46,  name: 'harp',                 glyph: 'triangle' },
+  { program: 107, name: 'koto',                 glyph: 'triangle' },
+  /* music box, kalimba and bells */
+  { program: 10,  name: 'music box',            glyph: 'circle'   },
+  { program: 108, name: 'kalimba',              glyph: 'circle'   },
+  { program: 8,  name: 'soft bells (celesta)',  glyph: 'ring'     },
+  { program: 9,  name: 'glockenspiel',          glyph: 'ring'     },
+  { program: 112, name: 'tinkle bell',          glyph: 'ring'     },
+  { program: 14, name: 'tubular bells',         glyph: 'ring'     },
+  /* mallets */
+  { program: 11, name: 'vibraphone',            glyph: 'diamond'  },
+  { program: 12, name: 'marimba',               glyph: 'diamond'  },
+  { program: 13, name: 'xylophone',             glyph: 'diamond'  },
+  { program: 15, name: 'dulcimer',              glyph: 'diamond'  },
+  { program: 114, name: 'steel drums',          glyph: 'diamond'  },
+  /* synths */
+  { program: 80, name: 'basic synth',           glyph: 'bar'      },
+  { program: 89, name: 'warm synth pad',        glyph: 'bar'      }
+];
+let currentProgram = 0;
+function instrumentByProgram(p){
+  return INSTRUMENTS.find(i => i.program === p) || INSTRUMENTS[0];
+}
+function currentInstrumentProgram(){
+  return currentProgram;
+}
+const optionButtons = [];
+INSTRUMENTS.forEach(inst => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'inst-option';
+  b.setAttribute('role', 'option');
+  b.dataset.program = String(inst.program);
+  b.innerHTML = '<span class="glyph g-' + inst.glyph + '"></span>' + escapeHtml(inst.name);
+  b.addEventListener('click', () => chooseInstrument(inst.program));
+  instOptions.appendChild(b);
+  optionButtons.push(b);
+});
+function renderInstrumentUI(){
+  const inst = instrumentByProgram(currentProgram);
+  instTriggerName.textContent = inst.name;
+  instTriggerGlyph.className = 'glyph g-' + inst.glyph;
+  optionButtons.forEach(b => {
+    b.setAttribute('aria-selected', String(parseInt(b.dataset.program, 10) === currentProgram));
+  });
+}
+function openInstMenu(){
+  instOptions.hidden = false;
+  instTrigger.setAttribute('aria-expanded', 'true');
+}
+function closeInstMenu(){
+  instOptions.hidden = true;
+  instTrigger.setAttribute('aria-expanded', 'false');
+}
+instTrigger.addEventListener('click', () => {
+  uiSound('menu');
+  instOptions.hidden ? openInstMenu() : closeInstMenu();
+});
+async function chooseInstrument(program){
+  closeInstMenu();
+  instTrigger.focus();
+  if (program === currentProgram) return;
+  currentProgram = program;
+  renderInstrumentUI();
+  uiSound('select');
+  saveState();
+  if (!audioReady){ initAudio(); }
+  if (!synthControl || !tuneObjects.length) return;
+  if (isPlaying){ synthControl.pause(); isPlaying = false; updatePlayButton(); }
+  setStatus('switching instrument…');
+  await loadTuneIntoSynth(true);
+}
+document.addEventListener('click', (e) => {
+  if (!instMenu.contains(e.target)) closeInstMenu();
+});
+instMenu.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape'){
+    closeInstMenu();
+    instTrigger.focus();
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    if (instOptions.hidden) openInstMenu();
+    const idx = optionButtons.indexOf(document.activeElement);
+    const next = e.key === 'ArrowDown'
+      ? Math.min(optionButtons.length - 1, idx + 1)
+      : Math.max(0, idx <= 0 ? 0 : idx - 1);
+    optionButtons[next].focus();
+  }
+});
+
+/* ---------------------------------------------------------
+   Local storage — autosave the session so a crash, a force
+   quit, or iOS closing the home-screen app never loses work
+--------------------------------------------------------- */
+const STORAGE_KEY = 'abc-composer-state-v1';
+function saveState(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      text: abcInput.value,
+      instrument: currentProgram,
+      measures: measureToggle.checked,
+      savedAt: Date.now()
+    }));
+  }catch(err){ /* storage unavailable — nothing to do */ }
+}
+function restoreState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    let restored = false;
+    if (typeof s.text === 'string' && s.text.length){
+      abcInput.value = s.text;
+      restored = true;
+    }
+    if (INSTRUMENTS.some(i => i.program === Number(s.instrument))){
+      currentProgram = Number(s.instrument);
+    }
+    if (typeof s.measures === 'boolean') measureToggle.checked = s.measures;
+    return restored;
+  }catch(err){ return false; }
+}
+function debounce(fn, ms){
+  let t;
+  return function(...args){
+    clearTimeout(t);
+    t = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+/* ---------------------------------------------------------
+   UI sounds — one short natural tone per button type,
+   synthesized with Web Audio. iOS suspends/interrupts audio
+   contexts when the app is left, so every context is re-woken
+   on visibility change and on the very next touch/keystroke.
+--------------------------------------------------------- */
+let uiCtx = null;
+function uiAudio(){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!uiCtx || uiCtx.state === 'closed') uiCtx = new AC();
+    if (uiCtx.state !== 'running'){
+      /* covers both 'suspended' and iOS 'interrupted' */
+      try{ uiCtx.resume(); }catch(err){}
+    }
+    return uiCtx;
+  }catch(err){ return null; }
+}
+function wakeAudio(){
+  try{
+    if (uiCtx && uiCtx.state !== 'running') uiCtx.resume();
+  }catch(err){}
+}
+function blip(ctx, opts){
+  opts = opts || {};
+  const type = opts.type || 'sine';
+  const from = opts.from || 440;
+  const to   = opts.to || null;
+  const dur  = opts.dur  || 0.08;
+  const vol  = opts.vol  || 0.06;
+  const when = opts.when || 0;
+  const t0 = ctx.currentTime + when;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(from, t0);
+  if (to) osc.frequency.exponentialRampToValueAtTime(to, t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g);
+  g.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.03);
+}
+async function uiSound(name){
+  try{
+    const ctx = uiAudio();
+    if (!ctx) return;
+    if (ctx.state !== 'running'){
+      try{ await ctx.resume(); }catch(err){}
+    }
+    switch(name){
+      case 'play':        /* rising fifth: go */
+        blip(ctx, {type:'triangle', from:523.25, dur:0.07, vol:0.07});
+        blip(ctx, {type:'triangle', from:783.99, dur:0.09, vol:0.07, when:0.07});
+        break;
+      case 'pause':       /* falling fifth: hold */
+        blip(ctx, {type:'triangle', from:783.99, dur:0.07, vol:0.07});
+        blip(ctx, {type:'triangle', from:523.25, dur:0.09, vol:0.07, when:0.07});
+        break;
+      case 'stop':        /* low thud */
+        blip(ctx, {type:'sine', from:196, to:98, dur:0.16, vol:0.09});
+        break;
+      case 'render':      /* bright two-step click */
+        blip(ctx, {type:'square', from:987.77, dur:0.045, vol:0.04});
+        blip(ctx, {type:'sine', from:1318.5, dur:0.08, vol:0.05, when:0.045});
+        break;
+      case 'upload':      /* upward pop */
+        blip(ctx, {type:'sine', from:330, to:660, dur:0.1, vol:0.07});
+        break;
+      case 'menu':        /* quick high tick for the instrument menu */
+        blip(ctx, {type:'square', from:1244.51, dur:0.03, vol:0.035});
+        break;
+      case 'select':      /* soft mid blip */
+        blip(ctx, {type:'sine', from:587.33, dur:0.07, vol:0.06});
+        break;
+      case 'dl-abc':      /* descending A–E */
+        blip(ctx, {type:'sine', from:880, dur:0.06, vol:0.06});
+        blip(ctx, {type:'sine', from:659.25, dur:0.09, vol:0.06, when:0.06});
+        break;
+      case 'dl-svg':      /* descending G–D */
+        blip(ctx, {type:'sine', from:783.99, dur:0.06, vol:0.06});
+        blip(ctx, {type:'sine', from:587.33, dur:0.09, vol:0.06, when:0.06});
+        break;
+      case 'dl-midi':     /* descending three-note arp */
+        blip(ctx, {type:'triangle', from:1046.5, dur:0.05, vol:0.05});
+        blip(ctx, {type:'triangle', from:880, dur:0.05, vol:0.05, when:0.05});
+        blip(ctx, {type:'triangle', from:1318.5, dur:0.08, vol:0.05, when:0.10});
+        break;
+      case 'dl-wav':      /* rising three-note arp */
+        blip(ctx, {type:'triangle', from:659.25, dur:0.05, vol:0.05});
+        blip(ctx, {type:'triangle', from:880, dur:0.05, vol:0.05, when:0.05});
+        blip(ctx, {type:'triangle', from:1318.5, dur:0.09, vol:0.05, when:0.10});
+        break;
+      case 'toggle-on':   /* crisp high tick */
+        blip(ctx, {type:'square', from:1567.98, dur:0.035, vol:0.04});
+        break;
+      case 'toggle-off':  /* softer lower tick */
+        blip(ctx, {type:'square', from:1046.5, dur:0.035, vol:0.04});
+        break;
+      default:
+        blip(ctx, {type:'sine', from:660, dur:0.05, vol:0.05});
+    }
+  }catch(err){ /* sounds are decorative — never break the app */ }
+}
+
+/* ---------------------------------------------------------
+   Syntax highlighting (overlay <pre> behind the textarea)
+--------------------------------------------------------- */
+const HEADER_FIELDS = "ABCDFGHIKLMNOPQRSTUVWXZ";
+const FIELD_CLASS = { K:'tok-key', M:'tok-meter', L:'tok-meter', Q:'tok-tempo', T:'tok-title', C:'tok-title' };
+function escapeHtml(s){
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+const MUSIC_RE = /(%.*$)|("(?:[^"\\]|\\.)*")|(!([^!\s]*)!|\+[^+\s]*\+)|(\[[A-Za-z]:[^\]]*\])|(\{[^}]*\})|(\[\|\]?|\|\]|\|\||::|:\|\|?|\|:|\|\d+(?:[,-]\d+)*|\||\[\d+(?:[,-]\d+)*)|(\(\d(?::\d*){0,2})|([\^_=]+)|([A-Ga-g])|([zZxX])|([',]+)|(\d+\/\d+|\d+\/*|\/+\d*)|([<>]+)|([()\-])|([\[\]])|([.~HLMOPSTuv])|(&)/g;
+function span(cls, text){ return '<span class="' + cls + '">' + escapeHtml(text) + '</span>'; }
+function setVoice(measureState, raw){
+  const idMatch = (raw || '').trim().match(/^\S+/);
+  const voiceId = idMatch ? idMatch[0] : 'default';
+  measureState.currentVoice = voiceId;
+  if (!(voiceId in measureState.counters)) measureState.counters[voiceId] = 0;
+}
+function decoClass(name){
+  if (/^ped/i.test(name)) return 'tok-pedal';
+  if (/^(p+|f+|mp|mf|sfz?|fp|crescendo[()]|diminuendo[()]|<[()]|>[()])$/i.test(name)) return 'tok-dyn';
+  return 'tok-deco';
+}
+function highlightLine(line, measureState, showMeasures){
+  if (line.length === 0) return '';
+  if (/^%%/.test(line)) return span('tok-directive', line);
+  if (/^%/.test(line)) return span('tok-comment', line);
+  if (/^[wW]:/.test(line)) return span('tok-lyric', line);
+  const headerMatch = line.match(/^([A-Za-z]):(.*)$/);
+  if (headerMatch && HEADER_FIELDS.includes(headerMatch[1].toUpperCase())){
+    const letter = headerMatch[1].toUpperCase();
+    if (letter === 'V'){
+      setVoice(measureState, headerMatch[2]);
+      return span('tok-voice', headerMatch[1] + ':' + headerMatch[2]);
+    }
+    return span('tok-field', headerMatch[1] + ':') + span(FIELD_CLASS[letter] || 'tok-header-value', headerMatch[2]);
+  }
+  let out = '', last = 0, m;
+  MUSIC_RE.lastIndex = 0;
+  while ((m = MUSIC_RE.exec(line)) !== null){
+    if (m[0].length === 0){ MUSIC_RE.lastIndex++; continue; }
+    out += escapeHtml(line.slice(last, m.index));
+    last = m.index + m[0].length;
+    const t = m[0];
+    if (m[1]) out += span('tok-comment', t);
+    else if (m[2]) out += span(/^"[\^_<>@]/.test(t) ? 'tok-annot' : 'tok-chord', t);
+    else if (m[3]) out += span(m[4] !== undefined ? decoClass(m[4]) : 'tok-deco', t);
+    else if (m[5]){
+      if (/^\[V:/i.test(t)){ setVoice(measureState, t.slice(3, -1)); out += span('tok-voice', t); }
+      else out += span('tok-inline', t);
+    }
+    else if (m[6]) out += span('tok-grace', t);
+    else if (m[7]){
+      if (showMeasures && !/^\[\d/.test(t)){
+        const key = measureState.currentVoice || '__default__';
+        if (!(key in measureState.counters)) measureState.counters[key] = 0;
+        measureState.counters[key] += 1;
+        out += '<span class="tok-measure">' + measureState.counters[key] + '</span>';
+      }
+      out += span('tok-bar', t);
+    }
+    else if (m[8]) out += span('tok-tuplet', t);
+    else if (m[9]) out += span('tok-acc', t);
+    else if (m[10]) out += span('tok-note', t);
+    else if (m[11]) out += span('tok-rest', t);
+    else if (m[12]) out += span('tok-oct', t);
+    else if (m[13]) out += span('tok-dur', t);
+    else if (m[14]) out += span('tok-broken', t);
+    else if (m[15]) out += span('tok-tie', t);
+    else if (m[16]) out += span('tok-chordbr', t);
+    else if (m[17]) out += span('tok-short', t);
+    else if (m[18]) out += span('tok-voice', t);
+  }
+  return out + escapeHtml(line.slice(last));
+}
+function updateHighlight(){
+  const showMeasures = measureToggle.checked;
+  const measureState = { currentVoice: null, counters: {} };
+  const lines = abcInput.value.split('\n').map(line => highlightLine(line, measureState, showMeasures));
+  highlightCode.innerHTML = lines.join('\n') + '\n';
+}
+measureToggle.addEventListener('change', () => {
+  uiSound(measureToggle.checked ? 'toggle-on' : 'toggle-off');
+  updateHighlight();
+  saveState();
+  if (abcInput.value.trim()) drawScore(abcInput.value);
+});
+abcInput.addEventListener('scroll', () => {
+  document.getElementById('abc-highlight').scrollTop = abcInput.scrollTop;
+  document.getElementById('abc-highlight').scrollLeft = abcInput.scrollLeft;
+});
+if (typeof ResizeObserver !== 'undefined'){
+  new ResizeObserver(() => {
+    document.getElementById('abc-highlight').style.height = abcInput.offsetHeight + 'px';
+  }).observe(abcInput);
+}
+
+/* ---------------------------------------------------------
+   File upload (button + drag-and-drop)
+--------------------------------------------------------- */
+function loadFileText(file){
+  if (!file) return;
+  const okExtension = /\.(abc|txt)$/i.test(file.name);
+  if (!okExtension){
+    setStatus('please choose a .abc or .txt file.', true);
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    abcInput.value = String(reader.result);
+    charCount.textContent = abcInput.value.length + ' characters';
+    updateHighlight();
+    renderTune();
+    saveState();
+    setStatus('loaded ' + file.name);
+  };
+  reader.onerror = () => setStatus('could not read that file.', true);
+  reader.readAsText(file);
+}
+uploadBtn.addEventListener('click', () => {
+  uiSound('upload');
+  fileInput.click();
+});
+fileInput.addEventListener('change', () => {
+  loadFileText(fileInput.files && fileInput.files[0]);
+  fileInput.value = '';
+});
+['dragenter', 'dragover'].forEach(evt => {
+  editorPane.addEventListener(evt, (e) => {
+    e.preventDefault();
+    editorPane.classList.add('drag-over');
+  });
+});
+['dragleave', 'dragend'].forEach(evt => {
+  editorPane.addEventListener(evt, () => editorPane.classList.remove('drag-over'));
+});
+editorPane.addEventListener('drop', (e) => {
+  e.preventDefault();
+  editorPane.classList.remove('drag-over');
+  const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) uiSound('upload');
+  loadFileText(file);
+});
+
+/* ---------------------------------------------------------
+   Rendering — the score sheet is always white with dark ink;
+   playback uses whatever tempo is written in the source (Q:)
+--------------------------------------------------------- */
+const pager = document.getElementById('pager');
+const stage = document.getElementById('stage');
+const audioSrc = document.getElementById('audio-src');
+const pageNav = document.getElementById('page-nav');
+const pageLabel = document.getElementById('page-label');
+const exportPdfBtn = document.getElementById('export-pdf');
+
+/* A4 portrait at 96 dpi: 210 x 297 mm  ->  793 x 1122 css px.
+   These numbers drive both the engraving and the pagination, and
+   the print stylesheet uses the very same sheet size. */
+const PAGE_W = 793, PAGE_H = 1122;
+const MARGIN_X = 57;           /* ~15 mm left / right */
+const PAD_TOP = 57;            /* ~15 mm top */
+const PAD_BOTTOM = 72;         /* ~19 mm bottom, includes the page number */
+const SCORE_SCALE = 0.7;       /* shrinks the music so more measures fit on a line; raise it for bigger notes */
+const BODY_H = PAGE_H - PAD_TOP - PAD_BOTTOM;
+
+let scoreBlocks = [];
+
+/* abc2svg picks a clef automatically (and swaps treble/bass mid-line) for any
+   voice that has no clef of its own. Give every such voice an explicit treble
+   clef so the clef never changes unless the author writes one. */
+function lockClefs(src){
+  const CLEF = /(\bclef\s*=|\b(treble|bass|alto|tenor|soprano|mezzosoprano|baritone|perc)\b)/i;
+  const hasClef = t => CLEF.test(t.replace(/"[^"]*"/g, ''));
+  if (/^%%clef\b/m.test(src)) return src;
+  let st = null;
+  return src.split('\n').map(line => {
+    if (/^X:/.test(line)){ st = { seen:new Set(), kDone:false, hasV:false }; return line; }
+    if (!st) st = { seen:new Set(), kDone:false, hasV:false };
+    if (/^%/.test(line)) return line;
+    let m = line.match(/^V:\s*(\S+)(.*)$/);
+    if (m){
+      st.hasV = true;
+      if (!st.seen.has(m[1])){
+        st.seen.add(m[1]);
+        if (!hasClef(m[2])) return line.replace(/\s*$/, '') + ' clef=treble';
+      }
+      return line;
+    }
+    m = line.match(/^K:(.*)$/);
+    if (m){
+      if (!st.kDone){
+        st.kDone = true;
+        if (!st.hasV && !hasClef(m[1])) return line.replace(/\s*$/, '') + ' clef=treble';
+      }
+      return line;
+    }
+    if (/^[A-Za-z]:/.test(line)) return line;
+    return line.replace(/\[V:\s*([^\s\]]+)([^\]]*)\]/g, (all, id, rest) => {
+      if (st.seen.has(id)) return all;
+      st.seen.add(id);
+      return hasClef(rest) ? all : '[V:' + id + rest + ' clef=treble]';
+    });
+  }).join('\n');
+}
+
+/* engraving style: serif title block, tidy spacing, quiet measure numbers */
+function engravingDirectives(){
+  const d = [
+    '%%pagewidth ' + PAGE_W + 'px',
+    '%%leftmargin ' + MARGIN_X + 'px',
+    '%%rightmargin ' + MARGIN_X + 'px',
+    '%%topspace 0',
+    '%%scale ' + SCORE_SCALE,
+    '%%musicspace 0.3cm',
+    '%%staffsep 34pt',
+    '%%sysstaffsep 22pt',
+    '%%stretchlast 0.7',
+    '%%titlefont serif bold 24',
+    '%%subtitlefont serif 14',
+    '%%composerfont serif italic 12',
+    '%%tempofont serif bold 10',
+    '%%partsfont serif bold 12',
+    '%%measurefont serif italic 9',
+    '%%composerspace 0.25cm',
+    '%%titlespace 0.5cm'
+  ];
+  if (measureToggle.checked) d.push('%%measurenb 0');
+  return d.join('\n') + '\n';
+}
+
+function emptyScore(){
+  scoreBlocks = [];
+  pager.innerHTML = '<p class="score-empty" style="flex:0 0 100%">your rendered score will appear here.</p>';
+  pageNav.hidden = true;
+}
+function drawScore(src){
+  if (typeof Abc === 'undefined'){
+    setStatus('the score engine did not load — check your connection.', true);
+    return;
+  }
+  let out = '', errs = '';
+  try{
+    const a = new Abc({ img_out: p => { out += p; }, errmsg: m => { errs += m + '\n'; }, read_file: () => '' });
+    a.tosvg('score', engravingDirectives() + lockClefs(src));
+  }catch(err){ console.error(err); errs += String(err); }
+  stage.innerHTML = out;
+  scoreBlocks = Array.from(stage.children);
+  paginate();
+  if (errs.trim()) setStatus('notation warning: ' + errs.trim().split('\n')[0].slice(0, 120), true);
+}
+/* fit the A4 sheet to the width of the pane (never enlarge past 1:1) */
+function updateScale(){
+  const avail = pager.clientWidth;
+  if (!avail) return;
+  pager.style.setProperty('--k', Math.min(1, avail / PAGE_W).toFixed(4));
+}
+/* flow the systems onto A4 sheets */
+function paginate(){
+  if (!scoreBlocks.length){ emptyScore(); return; }
+  stage.append(...scoreBlocks);
+  const pages = [];
+  let cur = [], h = 0;
+  scoreBlocks.forEach(b => {
+    const bh = b.getBoundingClientRect().height;
+    if (cur.length && h + bh > BODY_H){ pages.push(cur); cur = []; h = 0; }
+    cur.push(b); h += bh;
+  });
+  if (cur.length) pages.push(cur);
+  const title = (tuneTitle.textContent && tuneTitle.textContent !== '—') ? tuneTitle.textContent : '';
+  pager.innerHTML = '';
+  pages.forEach((list, i) => {
+    const pg = document.createElement('div');
+    pg.className = 'score-page';
+    const fit = document.createElement('div');
+    fit.className = 'sheet-fit';
+    const sheet = document.createElement('div');
+    sheet.className = 'sheet';
+    sheet.append(...list);
+    const foot = document.createElement('div');
+    foot.className = 'sheet-foot';
+    foot.textContent = (pages.length > 1 ? (i + 1) + ' / ' + pages.length : '1') + (title && i > 0 ? '  ·  ' + title : '');
+    sheet.appendChild(foot);
+    fit.appendChild(sheet);
+    pg.appendChild(fit);
+    pager.appendChild(pg);
+  });
+  updateScale();
+  pageNav.hidden = pages.length < 2;
+  updatePageLabel();
+}
+function currentPage(){ return Math.round(pager.scrollLeft / Math.max(1, pager.clientWidth)); }
+function updatePageLabel(){
+  const n = pager.children.length;
+  pageLabel.textContent = 'page ' + Math.min(n, currentPage() + 1) + ' / ' + n;
+}
+function goPage(i){
+  const n = pager.children.length;
+  const t = Math.max(0, Math.min(n - 1, i));
+  pager.scrollTo({ left: t * pager.clientWidth, behavior: 'smooth' });
+}
+pager.addEventListener('scroll', debounce(updatePageLabel, 60));
+document.getElementById('page-prev').addEventListener('click', () => { uiSound('select'); goPage(currentPage() - 1); });
+document.getElementById('page-next').addEventListener('click', () => { uiSound('select'); goPage(currentPage() + 1); });
+/* the sheet layout is fixed, so resizing only rescales it — no re-engraving */
+window.addEventListener('resize', debounce(() => {
+  if (document.getElementById('view-composer').hidden) return;
+  updateScale();
+  updatePageLabel();
+}, 120));
+
+function renderTune(){
+  const src = normalizeAbc(abcInput.value);
+  lastTuneSrc = src;
+  if (!src.trim()){
+    emptyScore();
+    tuneTitle.textContent = '—';
+    tuneObjects = [];
+    return;
+  }
+  /* abcjs parses the tune (hidden) for playback; abc2svg draws the visible score */
+  try{
+    tuneObjects = ABCJS.renderAbc(audioSrc, src, {});
+  }catch(err){ tuneObjects = []; console.error(err); }
+  const t = tuneObjects[0];
+  tuneTitle.textContent = (t && t.metaText && t.metaText.title) ? t.metaText.title : 'untitled';
+  drawScore(src);
+  if (synthControl && audioReady && tuneObjects.length){
+    loadTuneIntoSynth(false);
+  }
+}
+abcInput.addEventListener('input', () => {
+  charCount.textContent = abcInput.value.length + ' characters';
+  updateHighlight();
+});
+abcInput.addEventListener('input', debounce(renderTune, 500));
+abcInput.addEventListener('input', debounce(saveState, 400));
+renderBtn.addEventListener('click', () => {
+  uiSound('render');
+  renderTune();
+  saveState();
+});
+
+/* export pdf: the browser's print dialog saves exactly what the preview shows
+   (A4 portrait, no margins), so pick "Save as PDF" as the destination */
+exportPdfBtn.addEventListener('click', () => {
+  uiSound('dl-svg');
+  if (!abcInput.value.trim() || !scoreBlocks.length){
+    setStatus('render a score first.', true);
+    return;
+  }
+  renderTune();
+  setStatus('choose “Save as PDF”, paper A4, margins none.');
+  setTimeout(() => window.print(), 150);
+});
+
+/* ---------------------------------------------------------
+   Cursor-following playback highlight
+--------------------------------------------------------- */
+let lastHighlighted = [];
+const cursorControl = {
+  onStart: function(){
+    isPlaying = true;
+    updatePlayButton();
+  },
+  onEvent: function(ev){
+    if (ev.measureStart && ev.left === null) return;
+    lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+    lastHighlighted = [];
+    if (ev.elements){
+      ev.elements.forEach(group => {
+        group.forEach(el => {
+          el.classList.add('abcjs-highlight');
+          lastHighlighted.push(el);
+        });
+      });
+    }
+  },
+  onFinished: function(){
+    isPlaying = false;
+    updatePlayButton();
+    lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+    lastHighlighted = [];
+  },
+  onBeat: function(){}
+};
+
+/* ---------------------------------------------------------
+   Input tidy-up: ties.  A tie is a hyphen written directly after
+   the first note (c4-c4, c4-|c4, [ce]-[ce]).  Phones and some
+   keyboards swap "-" for a typographic dash, and people often leave
+   a space before it ("c4 -c4"); both make the engine reject the tie
+   ("Bad character '-'"), so no tie is drawn or played.  Fix both on
+   music lines only (never in titles, lyrics, comments, !decorations!,
+   "chord symbols" or [K:] inline fields).
+--------------------------------------------------------- */
+const TIE_PROTECT = /%.*$|"(?:[^"\\]|\\.)*"|![^!\s]*!|\+[^+\s]*\+|\[[A-Za-z]:[^\]]*\]/g;
+const TIE_DASHES  = /[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE63\uFF0D]/g;
+const TIE_SPACED  = /([A-Ga-g][,']*(?:\d+\/\d+|\d+\/*|\/+\d*)?|\])[ \t]+-/g;
+function normalizeAbc(src){
+  return src.split('\n').map(line => {
+    if (/^\s*%/.test(line)) return line;                 /* comments + %% directives */
+    if (/^[A-Za-z]:/.test(line)) return line;            /* header fields, lyrics (w:) */
+    let out = '', last = 0, m;
+    TIE_PROTECT.lastIndex = 0;
+    const fix = t => t.replace(TIE_DASHES, '-').replace(TIE_SPACED, '$1-');
+    while ((m = TIE_PROTECT.exec(line)) !== null){
+      if (m[0].length === 0){ TIE_PROTECT.lastIndex++; continue; }
+      out += fix(line.slice(last, m.index)) + m[0];
+      last = m.index + m[0].length;
+    }
+    return out + fix(line.slice(last));
+  }).join('\n');
+}
+
+/* ---------------------------------------------------------
+   Sustain pedal.  abcjs ignores !ped! marks, so we read them from
+   the text, work out when each one happens in the music, and then
+   (a) lengthen the notes that are still held when the pedal is down
+   (playback + wav) and (b) write real CC64 sustain events into the
+   downloaded midi file.  All times are in whole notes, like abcjs.
+--------------------------------------------------------- */
+function voiceSwitches(src){
+  const sw = [{ pos: 0, voice: '' }];
+  let offset = 0;
+  src.split('\n').forEach(line => {
+    const start = offset; offset += line.length + 1;
+    if (/^\s*%/.test(line)) return;
+    const h = line.match(/^V:\s*(\S+)/);
+    if (h){ sw.push({ pos: start, voice: h[1] }); return; }
+    if (/^[A-Za-z]:/.test(line)) return;
+    const re = /\[V:\s*([^\s\]]+)[^\]]*\]/g;
+    let m;
+    while ((m = re.exec(line)) !== null) sw.push({ pos: start + m.index, voice: m[1] });
+  });
+  return sw;
+}
+function voiceAt(sw, pos){
+  let v = '';
+  for (let i = 0; i < sw.length; i++){ if (sw[i].pos <= pos) v = sw[i].voice; else break; }
+  return v;
+}
+function pedalMarkers(src, sw){
+  const out = [];
+  let offset = 0;
+  src.split('\n').forEach(line => {
+    const start = offset; offset += line.length + 1;
+    if (/^\s*%/.test(line) || /^[A-Za-z]:/.test(line)) return;
+    const re = /"(?:[^"\\]|\\.)*"|!([^!\s]*)!|%.*$/g;
+    let m;
+    while ((m = re.exec(line)) !== null){
+      if (m[0][0] === '%') break;
+      if (m[1] === undefined) continue;
+      const n = m[1].toLowerCase();
+      const pos = start + m.index;
+      if (n === 'ped' || n === 'ped(')        out.push({ pos, voice: voiceAt(sw, pos), down: true });
+      else if (n === 'ped-up' || n === 'ped)') out.push({ pos, voice: voiceAt(sw, pos), down: false });
+    }
+  });
+  return out;
+}
+/* notes: [{start, end, startChar, endChar}] from every track.
+   Returns pedal-down intervals [[from, to], ...]; `to` may be Infinity. */
+function pedalIntervals(src, notes){
+  const sw = voiceSwitches(src);
+  const markers = pedalMarkers(src, sw);
+  if (!markers.length || !notes.length) return [];
+  const byVoice = {};
+  notes.forEach(n => {
+    if (n.startChar === undefined) return;
+    (byVoice[voiceAt(sw, n.startChar)] = byVoice[voiceAt(sw, n.startChar)] || []).push(n);
+  });
+  const events = [];
+  markers.forEach(mk => {
+    const list = byVoice[mk.voice] || notes;
+    /* the first note of this voice at or after the mark; a note's text range
+       includes the decorations written before it, so compare with endChar */
+    let target = Infinity;
+    list.forEach(n => { if (n.endChar > mk.pos && n.startChar < target) target = n.startChar; });
+    if (target === Infinity){
+      let end = 0;
+      list.forEach(n => { if (n.end > end) end = n.end; });
+      events.push({ t: end, down: mk.down });
+    } else {
+      /* every pass of a repeated section hits the same note again */
+      const times = new Set();
+      list.forEach(n => { if (n.startChar === target) times.add(n.start); });
+      times.forEach(t => events.push({ t, down: mk.down }));
+    }
+  });
+  events.sort((a, b) => (a.t - b.t) || ((a.down ? 1 : 0) - (b.down ? 1 : 0)));  /* release before press */
+  const iv = [];
+  let open = null, lastKey = '';
+  events.forEach(ev => {
+    const key = ev.t + (ev.down ? 'd' : 'u');
+    if (key === lastKey) return;            /* the same mark written in two voices */
+    lastKey = key;
+    if (ev.down){
+      if (open !== null && ev.t > open) iv.push([open, ev.t]);   /* pressing again changes the pedal */
+      open = ev.t;
+    } else if (open !== null){
+      if (ev.t > open) iv.push([open, ev.t]);
+      open = null;
+    }
+  });
+  if (open !== null) iv.push([open, Infinity]);
+  return iv;
+}
+/* abcjs calls this with the per-track note map right before it renders the audio */
+function sustainCallback(tracks, ctx){
+  try{
+    const src = ctx && ctx.src;
+    if (!src || !/!ped/i.test(src)) return;
+    const all = [];
+    let total = 0;
+    tracks.forEach(t => t.forEach(n => { all.push(n); if (n.end > total) total = n.end; }));
+    const iv = pedalIntervals(src, all);
+    if (!iv.length) return;
+    /* start times of each pitch, so a re-struck key cuts off its own sustained note */
+    const starts = {};
+    all.forEach(n => { (starts[n.instrument + ':' + n.pitch] = starts[n.instrument + ':' + n.pitch] || []).push(n.start); });
+    all.forEach(n => {
+      for (let i = 0; i < iv.length; i++){
+        const a = iv[i][0], b = iv[i][1] === Infinity ? total : iv[i][1];
+        if (n.end > a + 1e-6 && n.end < b - 1e-6){
+          let e = b;
+          (starts[n.instrument + ':' + n.pitch] || []).forEach(s2 => { if (s2 > n.start + 1e-6 && s2 < e) e = s2; });
+          if (e > n.end) n.end = e;
+          break;
+        }
+      }
+    });
+  }catch(err){ console.error('sustain', err); }
+}
+function audioOptions(){
+  return {
+    soundFontUrl: SOUNDFONT_URL,
+    program: currentInstrumentProgram(),
+    midiTranspose: 0,
+    sequenceCallback: sustainCallback,
+    callbackContext: { src: lastTuneSrc }
+  };
+}
+/* add sustain-pedal controller events (CC64) to a midi file that abcjs made */
+function addPedalToMidi(bytes, tune, src){
+  if (!/!ped/i.test(src)) return bytes;
+  const cmds = tune.setUpAudio({});
+  const notes = [], channels = new Set();
+  let total = 0;
+  cmds.tracks.forEach(t => t.forEach(e => {
+    if (e.cmd === 'program' && e.instrument !== 128) channels.add(e.channel || 0);
+    if (e.cmd === 'note'){
+      const n = { start: e.start, end: e.start + e.duration, startChar: e.startChar, endChar: e.endChar };
+      notes.push(n);
+      if (n.end > total) total = n.end;
+    }
+  }));
+  const iv = pedalIntervals(src, notes);
+  if (!iv.length) return bytes;
+  if (!channels.size) channels.add(0);
+  const ev = [];
+  iv.forEach(([a, b]) => {
+    ev.push({ tick: Math.round(a * 1920), val: 127 });
+    ev.push({ tick: Math.round((b === Infinity ? total : b) * 1920), val: 0 });
+  });
+  ev.sort((x, y) => (x.tick - y.tick) || (x.val - y.val));
+  const vlq = n => { const o = [n & 0x7f]; while ((n >>= 7) > 0) o.unshift((n & 0x7f) | 0x80); return o; };
+  const body = [];
+  let lastTick = 0;
+  ev.forEach(e => {
+    let delta = Math.max(0, e.tick - lastTick);
+    lastTick = Math.max(lastTick, e.tick);
+    channels.forEach(ch => { body.push(...vlq(delta), 0xB0 | (ch & 15), 0x40, e.val); delta = 0; });
+  });
+  body.push(0x00, 0xFF, 0x2F, 0x00);
+  const len = body.length;
+  const chunk = [0x4D, 0x54, 0x72, 0x6B, (len >>> 24) & 255, (len >>> 16) & 255, (len >>> 8) & 255, len & 255].concat(body);
+  const out = new Uint8Array(bytes.length + chunk.length);
+  out.set(bytes, 0);
+  out.set(chunk, bytes.length);
+  const nTracks = ((bytes[10] << 8) | bytes[11]) + 1;
+  out[10] = (nTracks >> 8) & 255; out[11] = nTracks & 255;
+  return out;
+}
+
+/* ---------------------------------------------------------
+   Audio / synth setup
+--------------------------------------------------------- */
+function initAudio(){
+  if (typeof ABCJS === 'undefined' || !ABCJS.synth || !ABCJS.synth.supportsAudio || !ABCJS.synth.supportsAudio()){
+    setStatus('this browser does not support Web Audio playback — try a recent Chrome, Firefox, Safari or Edge.', true);
+    playBtn.disabled = true;
+    stopBtn.disabled = true;
+    return;
+  }
+  synthControl = new ABCJS.synth.SynthController();
+  synthControl.load("#audio-target", cursorControl, {
+    displayLoop: false,
+    displayRestart: false,
+    displayPlay: false,
+    displayProgress: false,
+    displayWarp: false
+  });
+  audioReady = true;
+  setStatus('ready — press play to hear the score.');
+}
+function loadTuneIntoSynth(userAction){
+  if (!synthControl || !tuneObjects.length) return Promise.resolve();
+  return synthControl.setTune(tuneObjects[0], userAction, audioOptions()).then(() => {
+    setStatus('ready — press play to hear the score.');
+  }).catch(err => {
+    setStatus('could not load the instrument sound — check your connection.', true);
+    console.error(err);
+  });
+}
+function updatePlayButton(){
+  playBtn.classList.toggle('is-playing', isPlaying);
+  playBtn.setAttribute('aria-label', isPlaying ? 'pause' : 'play');
+}
+
+/* ---------------------------------------------------------
+   Transport controls — playback always re-initialises inside
+   the tap gesture, which unlocks and re-wakes audio on iOS
+--------------------------------------------------------- */
+playBtn.addEventListener('click', async () => {
+  uiSound(isPlaying ? 'pause' : 'play');
+  if (!tuneObjects.length){
+    setStatus('render a score first.', true);
+    return;
+  }
+  if (!audioReady){
+    setStatus('starting audio engine…');
+    initAudio();
+  }
+  if (!synthControl) return;
+  try{
+    if (!isPlaying){
+      setStatus('loading instrument…');
+      await loadTuneIntoSynth(true);
+      await synthControl.play();
+      isPlaying = true;
+    } else {
+      synthControl.pause();
+      isPlaying = false;
+    }
+    updatePlayButton();
+  } catch(err){
+    setStatus('playback could not start — try again.', true);
+    console.error(err);
+  }
+});
+stopBtn.addEventListener('click', () => {
+  uiSound('stop');
+  if (!synthControl) return;
+  try{
+    synthControl.pause();
+    if (typeof synthControl.restart === 'function'){
+      synthControl.restart();
+    }
+  } catch(err){ /* no-op */ }
+  isPlaying = false;
+  updatePlayButton();
+  lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+  lastHighlighted = [];
+});
+
+/* ---------------------------------------------------------
+   Downloads
+--------------------------------------------------------- */
+function download(filename, content, mime){
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+downloadAbcBtn.addEventListener('click', () => {
+  uiSound('dl-abc');
+  download('tune.abc', abcInput.value, 'text/plain');
+});
+downloadSvgBtn.addEventListener('click', () => {
+  uiSound('dl-svg');
+  const svgs = scoreBlocks.map(b => b.matches('svg') ? b : b.querySelector('svg')).filter(Boolean);
+  if (!svgs.length){
+    setStatus('render a score first.', true);
+    return;
+  }
+  const fg = '#15130F', bg = '#FFFFFF';
+  let y = 0, W = 0, parts = '';
+  svgs.forEach(sv => {
+    const vb = sv.viewBox.baseVal, w = vb.width, h = vb.height;
+    W = Math.max(W, w);
+    parts += '<svg x="0" y="' + y + '" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" fill="' + fg + '" stroke-width=".7">' + sv.innerHTML + '</svg>';
+    y += h;
+  });
+  const src = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + W + '" height="' + y + '" viewBox="0 0 ' + W + ' ' + y + '" color="' + fg + '"><rect width="100%" height="100%" fill="' + bg + '"/>' + parts + '</svg>';
+  download('score.svg', src, 'image/svg+xml');
+});
+downloadMidiBtn.addEventListener('click', () => {
+  uiSound('dl-midi');
+  if (!abcInput.value.trim()){
+    setStatus('render a score first.', true);
+    return;
+  }
+  try{
+    const src = normalizeAbc(abcInput.value);
+    const opts = { program: currentInstrumentProgram() };
+    const tune = (ABCJS.parseOnly ? ABCJS.parseOnly(src) : ABCJS.renderAbc('*', src, {}))[0];
+    let html;
+    try{
+      /* build the file ourselves so the sustain pedal (CC64) can be written into it */
+      let bytes = ABCJS.synth.getMidiFile(tune, Object.assign({ midiOutputType: 'binary' }, opts));
+      bytes = addPedalToMidi(bytes, tune, src);
+      if (midiHolder.dataset.url) URL.revokeObjectURL(midiHolder.dataset.url);
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/midi' }));
+      midiHolder.dataset.url = url;
+      html = '<div class="abcjs-download-midi"><a download="tune.mid" href="' + url + '">download midi file</a></div>';
+    }catch(inner){
+      console.error(inner);
+      html = ABCJS.synth.getMidiFile(src, Object.assign({
+        midiOutputType: 'link', downloadLabel: 'download midi file', fileName: 'tune.mid'
+      }, opts));
+    }
+    midiHolder.innerHTML = html;
+  } catch(err){
+    setStatus('could not generate a midi file for this tune.', true);
+    console.error(err);
+  }
+});
+
+/* ---------------------------------------------------------
+   WAV export — abcjs renders the whole tune into one audio
+   buffer; we pull that buffer out, encode it as 16-bit PCM
+   WAV, and hand it over as a download
+--------------------------------------------------------- */
+function encodeWav(audioBuffer){
+  const numCh = Math.min(2, audioBuffer.numberOfChannels);
+  const sampleRate = audioBuffer.sampleRate;
+  const frames = audioBuffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = numCh * bytesPerSample;
+  const dataSize = frames * blockAlign;
+  const out = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(out);
+  const writeString = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numCh, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+  const channels = [];
+  for (let c = 0; c < numCh; c++) channels.push(audioBuffer.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < frames; i++){
+    for (let c = 0; c < numCh; c++){
+      const s = Math.max(-1, Math.min(1, channels[c][i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      off += 2;
+    }
+  }
+  return new Blob([out], { type: 'audio/wav' });
+}
+function extractAudioBuffer(cs){
+  const isAB = (b) => b && typeof b === 'object' &&
+    typeof b.getChannelData === 'function' &&
+    typeof b.numberOfChannels === 'number';
+  const cands = [];
+  try{
+    if (isAB(cs.buffer)) cands.push(cs.buffer);
+    if (Array.isArray(cs.buffers)) cs.buffers.forEach(b => { if (isAB(b)) cands.push(b); });
+    Object.keys(cs).forEach(k => { try{ if (isAB(cs[k])) cands.push(cs[k]); }catch(e){} });
+  }catch(err){}
+  if (!cands.length) return null;
+  cands.sort((a, b) => b.length - a.length); /* the full-tune buffer is by far the longest */
+  return cands[0];
+}
+let wavBusy = false;
+downloadWavBtn.addEventListener('click', async () => {
+  uiSound('dl-wav');
+  if (!tuneObjects.length){
+    setStatus('render a score first.', true);
+    return;
+  }
+  if (wavBusy) return;
+  wavBusy = true;
+  downloadWavBtn.disabled = true;
+  setStatus('rendering wav — hold on…');
+  try{
+    if (typeof ABCJS === 'undefined' || !ABCJS.synth || !ABCJS.synth.CreateSynth){
+      throw new Error('synth unavailable');
+    }
+    wakeAudio();
+    const cs = new ABCJS.synth.CreateSynth();
+    await cs.init({
+      visualObj: tuneObjects[0],
+      options: audioOptions()
+    });
+    /* init() only loads the instrument samples; prime() renders the tune into an audio buffer */
+    await cs.prime();
+    const buf = (typeof cs.getAudioBuffer === 'function' && cs.getAudioBuffer()) || extractAudioBuffer(cs);
+    if (!buf) throw new Error('no audio buffer produced');
+    download('tune.wav', encodeWav(buf), 'audio/wav');
+    setStatus('wav saved.');
+  } catch(err){
+    setStatus('could not render a wav — try again.', true);
+    console.error(err);
+  } finally {
+    wavBusy = false;
+    downloadWavBtn.disabled = false;
+  }
+});
+
+/* ---------------------------------------------------------
+   App lifecycle — save on the way out, wake audio on the way
+   back in. iOS kills audio contexts when a home-screen web
+   app is left, so sound is restored on visibility change and
+   again on the very next touch/keystroke (capture phase, so
+   it runs before any button handler).
+--------------------------------------------------------- */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible'){
+    wakeAudio();
+    /* playback never survives iOS backgrounding — reset cleanly
+       so the next press of play starts fresh and audible */
+    if (isPlaying && synthControl){
+      try{ synthControl.pause(); }catch(err){ /* no-op */ }
+      isPlaying = false;
+      updatePlayButton();
+      lastHighlighted.forEach(el => el.classList.remove('abcjs-highlight'));
+      lastHighlighted = [];
+    }
+  } else {
+    saveState();
+  }
+});
+window.addEventListener('pageshow', wakeAudio);
+window.addEventListener('pagehide', saveState);
+['pointerdown', 'keydown', 'touchend'].forEach(evt => {
+  document.addEventListener(evt, wakeAudio, { capture: true, passive: true });
+});
+
+/* ---------------------------------------------------------
+   Tabs + guide
+--------------------------------------------------------- */
+const viewComposer = document.getElementById('view-composer');
+const viewGuide = document.getElementById('guide');
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const guide = tab.dataset.tab === 'guide';
+    uiSound('select');
+    document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+    viewComposer.hidden = guide;
+    viewGuide.hidden = !guide;
+    window.scrollTo(0, 0);
+    if (!guide) drawScore(abcInput.value);
+  });
+});
+document.getElementById('load-pedal-example').addEventListener('click', () => {
+  const ex = document.querySelector('#guide pre').textContent;
+  if (abcInput.value.trim() && !confirm('Replace the current notation with the pedal example?')) return;
+  abcInput.value = ex;
+  charCount.textContent = ex.length + ' characters';
+  updateHighlight();
+  saveState();
+  document.getElementById('tab-composer').click();
+  renderTune();
+});
+
+/* ---------------------------------------------------------
+   Init — restore the saved session first, then render
+--------------------------------------------------------- */
+const restored = restoreState();
+renderInstrumentUI();
+charCount.textContent = abcInput.value.length + ' characters';
+updateHighlight();
+renderTune();
+initAudio();
+if (restored) setStatus('restored your last session — everything you were working on is here.');
+})();
+</script>
+</body>
+</html>
